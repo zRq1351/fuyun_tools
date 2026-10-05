@@ -115,7 +115,7 @@ fn extract_icon_from_shell(
             );
         }
 
-        let has_alpha = color_buffer.chunks_exact(4).any(|c| c[3] != 0);
+        let has_alpha = color_buffer.as_chunks::<4>().0.iter().any(|c| c[3] != 0);
 
         let mut final_buffer: Vec<u8> = Vec::with_capacity((width * height * 4) as usize);
         for i in 0..(width * height) as usize {

@@ -76,7 +76,7 @@ pub fn verify_downloaded_exe_integrity(
     let mut file = fs::File::open(path).map_err(|e| format!("读取下载文件失败: {}", e))?;
     file.read_exact(&mut header)
         .map_err(|e| format!("读取下载文件头失败: {}", e))?;
-    if header != [b'M', b'Z'] {
+    if header != *b"MZ" {
         return Err("下载文件不是有效的 Windows 可执行文件".to_string());
     }
     if let Some(expected) = expected_sha256 {

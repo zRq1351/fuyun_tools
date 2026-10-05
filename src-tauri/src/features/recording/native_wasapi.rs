@@ -332,10 +332,10 @@ fn capture_process_loopback_to_wav(
                 let mut processed = 0;
 
                 for slice in &[slices.0, slices.1] {
-                    let chunks = slice.chunks_exact(4);
+                    let (chunks, _remainder) = slice.as_chunks::<4>();
                     processed += chunks.len() * 4;
                     for chunk in chunks {
-                        let sample = f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
+                        let sample = f32::from_le_bytes(*chunk);
                         let out = if enabled {
                             (sample.clamp(-1.0, 1.0) * i16::MAX as f32) as i16
                         } else {

@@ -3925,7 +3925,7 @@ pub fn pause_recording(
                 runtime.wgc_thread.take()
             },
             runtime.system_audio_stop_flag.take(),
-            runtime.system_audio_threads.drain(..).collect::<Vec<_>>(),
+            std::mem::take(&mut runtime.system_audio_threads),
             runtime.mic_audio_stop_flag.take(),
             runtime.mic_audio_thread.take(),
             soft_pause,

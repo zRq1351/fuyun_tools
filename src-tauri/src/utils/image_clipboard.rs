@@ -2817,14 +2817,13 @@ fn parse_data_url_image(text: &str) -> Option<DecodedImagePayload> {
     let trimmed = text.trim();
     let data_url = if trimmed.starts_with("data:image/") {
         trimmed
-    } else if let Some(start) = trimmed.find("data:image/") {
+    } else {
+        let start = trimmed.find("data:image/")?;
         let candidate = &trimmed[start..];
         let end = candidate
             .find(|c: char| c == '"' || c == '\'' || c == ')' || c.is_whitespace())
             .unwrap_or(candidate.len());
         &candidate[..end]
-    } else {
-        return None;
     };
 
     let comma_pos = data_url.find(',')?;

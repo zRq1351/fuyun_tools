@@ -970,8 +970,10 @@ mod tests {
     #[test]
     fn test_recording_quality_preset_serde_roundtrip() {
         // recording_quality_preset 需完整序列化（get_ai_settings 返回）与反序列化（save 写回）
-        let mut settings = AppSettingsData::default();
-        settings.recording_quality_preset = "fhd".to_string();
+        let settings = AppSettingsData {
+            recording_quality_preset: "fhd".to_string(),
+            ..Default::default()
+        };
         let json = serde_json::to_string(&settings).unwrap();
         let v: serde_json::Value = serde_json::from_str(&json).unwrap();
         assert_eq!(v["recording_quality_preset"], "fhd");
