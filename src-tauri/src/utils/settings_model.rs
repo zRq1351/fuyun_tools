@@ -931,16 +931,28 @@ mod tests {
         assert!(!settings.recording_enabled);
     }
 
+    /// 真实形态 settings.json 样本：含常用字段与未知字段，模拟用户配置盘上格式（snake_case）
+    const REAL_SETTINGS_JSON_FIXTURE: &str = r#"{
+        "version": "0.8.53",
+        "max_items": 1000,
+        "hot_key": "Ctrl+Shift+Z",
+        "recording_enabled": true,
+        "text_clipboard_enabled": true,
+        "image_clipboard_enabled": true,
+        "text_max_items": 500,
+        "recording_quality_preset": "hd",
+        "recording_default_fps": 30,
+        "recording_default_video_bitrate_kbps": 6000,
+        "theme": "dark",
+        "unknown_future_field": {"nested": true}
+    }"#;
+
     #[test]
     fn test_parse_real_settings_json_recording_enabled() {
-        // 直接从用户实际运行的 settings.json 反序列化，验证 recording_enabled 读取路径
-        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("target")
-            .join("debug")
-            .join("settings.json");
-        let contents = std::fs::read_to_string(&path).expect("读取 settings.json 失败");
+        // 用真实形态的 settings.json 样本验证 recording_enabled 读取路径
+        // （不依赖运行环境里用户实际生成的配置文件，保证 CI 可重复）
         let parsed: serde_json::Value =
-            serde_json::from_str(&contents).expect("settings.json 不是合法 JSON");
+            serde_json::from_str(REAL_SETTINGS_JSON_FIXTURE).expect("settings.json 不是合法 JSON");
         let v = parsed
             .get("recording_enabled")
             .expect("缺少 recording_enabled 字段");
@@ -953,18 +965,16 @@ mod tests {
 
     #[test]
     fn test_real_settings_json_deserializes_to_app_settings_data() {
-        // 验证实际 settings.json 能完整反序列化为 AppSettingsData（load_settings 的路径）
-        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("target")
-            .join("debug")
-            .join("settings.json");
-        let contents = std::fs::read_to_string(&path).expect("读取 settings.json 失败");
-        let settings: AppSettingsData =
-            serde_json::from_str(&contents).expect("settings.json 反序列化为 AppSettingsData 失败");
+        // 验证真实形态 settings.json 能完整反序列化为 AppSettingsData（load_settings 的路径），
+        // 且未知字段被容忍（向前兼容）
+        let settings: AppSettingsData = serde_json::from_str(REAL_SETTINGS_JSON_FIXTURE)
+            .expect("settings.json 反序列化为 AppSettingsData 失败");
         assert!(
             settings.recording_enabled,
             "反序列化后 recording_enabled 应为 true"
         );
+        assert_eq!(settings.recording_quality_preset, "hd");
+        assert_eq!(settings.text_max_items, 500);
     }
 
     #[test]
