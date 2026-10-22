@@ -1,0 +1,228 @@
+body {
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  background: transparent;
+}
+
+html,
+body {
+  height: 100%;
+  background: transparent;
+}
+
+#app {
+  height: 100%;
+  background: transparent;
+  display: flex;
+  justify-content: flex-start;
+  align-items: flex-start;
+}
+
+.recording-toolbar-select-popper.el-popper {
+  --el-bg-color-overlay: var(--fy-bg-primary);
+  --el-fill-color-light: var(--fy-bg-hover);
+  --el-border-color-light: var(--fy-border);
+  --el-text-color-primary: var(--fy-text-primary);
+  width: 220px !important;
+  max-width: 220px !important;
+  min-width: 220px !important;
+  background: var(--fy-bg-primary) !important;
+  border-color: var(--fy-border) !important;
+  box-shadow: var(--fy-shadow-lg) !important;
+}
+
+.recording-toolbar-select-popper .el-select-dropdown__item {
+  color: var(--fy-text-primary);
+}
+
+.recording-toolbar-select-popper .el-select-dropdown__item.hover,
+.recording-toolbar-select-popper .el-select-dropdown__item:hover,
+.recording-toolbar-select-popper .el-select-dropdown__item.is-hovering {
+  background: var(--fy-bg-hover);
+}
+
+.recording-toolbar-select-popper .el-select-dropdown__item.selected,
+.recording-toolbar-select-popper .el-select-dropdown__item.is-selected {
+  color: var(--fy-accent);
+  font-weight: 600;
+  background-color: var(--fy-accent-bg);
+}
+
+.recording-toolbar-select-popper .el-select-dropdown__item.is-disabled {
+  color: var(--fy-text-muted);
+  cursor: not-allowed;
+}
+
+.recording-toolbar-select-popper.el-popper {
+  max-width: 220px;
+  overflow: hidden;
+}
+
+.recording-toolbar-select-popper .el-select-dropdown__item {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.recording-toolbar-select-popper .el-select-dropdown__empty {
+  color: var(--fy-text-muted);
+}
+
+.recording-toolbar-select-popper .el-scrollbar__bar.is-vertical .el-scrollbar__thumb,
+.recording-toolbar-select-popper .el-scrollbar__bar.is-horizontal .el-scrollbar__thumb {
+  background: var(--fy-border);
+}
+
+.recording-toolbar-select-popper .el-scrollbar__bar.is-vertical .el-scrollbar__thumb:hover,
+.recording-toolbar-select-popper .el-scrollbar__bar.is-horizontal .el-scrollbar__thumb:hover {
+  background: var(--fy-border-hover);
+}
+
+.recording-toolbar-audio-process-popper .el-select-dropdown__wrap {
+  max-height: 168px !important;
+}
+
+/* Element Plus 深色主题 CSS 变量覆盖 - 所有组件自动生效 */
+.capsule-settings-panel {
+  position: relative;
+  /* 背景色 */
+  --el-bg-color: var(--fy-bg-primary);
+  --el-bg-color-overlay: var(--fy-bg-overlay);
+  --el-bg-color-page: var(--fy-bg-primary);
+
+  /* 文字颜色 */
+  --el-text-color-primary: var(--fy-text-primary);
+  --el-text-color-regular: var(--fy-text-secondary);
+  --el-text-color-secondary: var(--fy-text-muted);
+  --el-text-color-placeholder: var(--fy-text-muted);
+  --el-text-color-disabled: var(--fy-text-muted);
+
+  /* 边框颜色 */
+  --el-border-color: var(--fy-border);
+  --el-border-color-light: var(--fy-border-light);
+  --el-border-color-lighter: var(--fy-border-light);
+  --el-border-color-extra-light: var(--fy-border-light);
+  --el-border-color-dark: var(--fy-border);
+
+  /* 填充色 */
+  --el-fill-color: var(--fy-bg-surface);
+  --el-fill-color-light: var(--fy-bg-hover);
+  --el-fill-color-lighter: var(--fy-bg-hover);
+  --el-fill-color-extra-light: var(--fy-bg-hover);
+  --el-fill-color-dark: var(--fy-bg-primary);
+  --el-fill-color-blank: var(--fy-bg-surface);
+
+  /* 禁用状态 */
+  --el-disabled-bg-color: var(--fy-bg-surface);
+  --el-disabled-text-color: var(--fy-text-muted);
+  --el-disabled-border-color: var(--fy-border-light);
+
+  /* 输入框 */
+  --el-input-text-color: var(--fy-text-primary);
+  --el-input-placeholder-color: var(--fy-text-muted);
+  --el-input-border-color: var(--fy-border);
+  --el-input-hover-border-color: var(--fy-border-hover);
+  --el-input-focus-border-color: var(--fy-border-active);
+  --el-input-disabled-text-color: var(--fy-text-muted);
+  --el-input-disabled-placeholder-color: var(--fy-text-muted);
+
+  /* Switch */
+  --el-switch-off-color: var(--fy-bg-hover);
+}
+
+/* 输入框/选择器 wrapper 样式 */
+.capsule-settings-panel .el-select__wrapper {
+  box-shadow: 0 0 0 1px var(--el-input-border-color) inset !important;
+}
+
+.capsule-settings-panel .el-select__wrapper:hover {
+  box-shadow: 0 0 0 1px var(--el-input-hover-border-color) inset !important;
+}
+
+.capsule-settings-panel .el-select__wrapper.is-focused {
+  box-shadow: 0 0 0 1px var(--el-input-focus-border-color) inset !important;
+}
+
+/* filterable 搜索输入框 */
+.capsule-settings-panel .el-select__input {
+  color: var(--fy-text-primary) !important;
+  -webkit-text-fill-color: var(--fy-text-primary) !important;
+}
+
+/* Switch label */
+.capsule-settings-panel .el-switch__label {
+  color: var(--fy-text-secondary) !important;
+}
+
+/* 输入数字按钮 */
+.capsule-settings-panel .el-input-number .el-input-number__decrease,
+.capsule-settings-panel .el-input-number .el-input-number__increase {
+  color: var(--fy-text-muted) !important;
+}
+
+.capsule-settings-panel .el-input-number .el-input-number__decrease:hover,
+.capsule-settings-panel .el-input-number .el-input-number__increase:hover {
+  color: var(--fy-text-primary) !important;
+}
+
+/* 目标模式按钮 */
+.target-mode-buttons {
+  display: inline-flex;
+  gap: 4px;
+  width: 100%;
+}
+
+.target-mode-btn {
+  border: 1px solid var(--fy-border);
+  background: var(--fy-bg-surface);
+  color: var(--fy-text-secondary);
+  border-radius: 7px;
+  padding: 4px 10px;
+  font-size: 12px;
+  line-height: 1.2;
+  cursor: pointer;
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.target-mode-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.target-mode-btn.active {
+  border-color: var(--fy-border-active);
+  background: var(--fy-accent-bg);
+  color: var(--fy-accent);
+}
+
+.target-region-meta {
+  margin-left: 8px;
+  color: var(--fy-text-secondary);
+  font-size: 11px;
+  opacity: 0.86;
+  white-space: nowrap;
+  max-width: 210px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.toolbar-settings-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.recording-toolbar-tooltip.el-popper {
+  background: var(--fy-bg-primary) !important;
+  border: 1px solid var(--fy-border-light) !important;
+  color: var(--fy-text-primary) !important;
+  box-shadow: var(--fy-shadow-lg);
+}
+
+.recording-toolbar-tooltip.el-popper .el-popper__arrow::before {
+  background: var(--fy-bg-primary) !important;
+  border: 1px solid var(--fy-border-light) !important;
+}

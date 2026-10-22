@@ -114,7 +114,13 @@ where
     )
 }
 
-/// 在独立线程调用：对三类数据做一次同步落盘（走真实 database API）
+/// 在**独立专用线程**调用：对三类数据做一次同步落盘（走真实 database API）。
+///
+/// # 调用约定（硬性）
+/// 本函数内部使用 `tauri::async_runtime::block_on` 阻塞等待落盘完成。
+/// **禁止**从 async 执行上下文（tokio worker / async fn 内部）调用——会 panic。
+/// 唯一合法调用点：专用落盘线程（见调用方的 `std::thread::spawn`）。
+/// 新增调用点时请改用 `*_async` 系列接口，不要复用本函数。
 fn persist_clipboard_snapshot_sync(
     items: &[String],
     categories: &HashMap<String, String>,
@@ -1338,6 +1344,14 @@ fn normalize_pinned_items(pinned_items: &mut Vec<String>, history: &[String]) {
     pinned_items.retain(|p| history_ids.contains(p));
 }
 
+/// 置顶排序：置顶项按 `pinned_items` 顺序置前，未置顶项保持原相对顺序。
+///
+/// 与图片侧 `image_clipboard::apply_pin_order` 是**有意分叉**的平行实现，合并前须先对齐语义：
+/// - 本侧以内容哈希（`stable_history_item_id`）为键；图片侧以 `item.id` 字段为键
+/// - 本侧清理不在 history 中的孤立置顶条目（B1）；图片侧无此逻辑
+/// - 图片侧对空入参提前返回；本侧无
+///
+/// 双侧行为已由各自测试模块的表征测试锁定。
 fn apply_pin_order(history: &mut Vec<String>, pinned_items: &[String]) {
     let mut pinned_set: HashSet<String> = pinned_items.iter().cloned().collect();
     let mut pinned_list = Vec::new();
@@ -1676,5 +1690,28 @@ mod tests {
             let _ =
                 crate::utils::database::save_history_items_only_async(&manager.get_history()).await;
         });
+    }
+    #[test]
+    fn test_apply_pin_order_pins_first_and_cleans_orphans() {
+        // 表征测试：锁定文本侧置顶排序语义（与图片侧有意分叉，见 apply_pin_order 文档）
+        let mut history = vec!["a".to_string(), "b".to_string(), "c".to_string()];
+        let pinned = vec![
+            crate::utils::database::stable_history_item_id("c"),
+            crate::utils::database::stable_history_item_id("a"),
+            "ghost".to_string(),
+        ];
+        apply_pin_order(&mut history, &pinned);
+        // 置顶项按 pinned_items 顺序（c, a）置前；b 保持原相对顺序在后；孤立条目 ghost 被忽略
+        assert_eq!(
+            history,
+            vec!["c".to_string(), "a".to_string(), "b".to_string()]
+        );
+    }
+
+    #[test]
+    fn test_apply_pin_order_empty_pinned_keeps_order() {
+        let mut history = vec!["a".to_string(), "b".to_string()];
+        apply_pin_order(&mut history, &[]);
+        assert_eq!(history, vec!["a".to_string(), "b".to_string()]);
     }
 }

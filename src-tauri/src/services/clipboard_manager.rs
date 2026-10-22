@@ -117,7 +117,7 @@ pub fn add_to_clipboard_history(
     }
 
     let payload = {
-        let manager = manager_arc.lock().unwrap();
+        let manager = lock_arc_mutex(&manager_arc);
         manager.add_to_history(content);
 
         if !should_emit {

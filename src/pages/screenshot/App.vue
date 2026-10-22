@@ -615,66 +615,42 @@
 
 <script setup>
 import {IPC_COMMANDS} from '../../services/ipc.js'
-import {computed, nextTick, onMounted, onUnmounted, reactive, ref, watchPostEffect} from 'vue'
+import {nextTick, onMounted, onUnmounted, reactive, ref, watchPostEffect} from 'vue'
 import {invoke} from '@tauri-apps/api/core'
-import {buildFileUrlFromPath} from '../../utils/fileUrl'
-import {emit, listen} from '@tauri-apps/api/event'
+import {listen} from '@tauri-apps/api/event'
 import {
-  ArrowUpRight,
   Bold,
   Check,
-  Circle,
   Copy,
   Crop,
   Download,
-  EyeOff,
-  Grid3x3,
-  Hash,
-  Highlighter,
   Layers,
-  Minus,
-  MousePointer2,
-  Pause,
   PenLine,
-  Pencil,
   Pin,
-  Pipette,
+  Pause,
   Play,
   Redo2,
   RotateCcw,
-  Square,
-  Type,
   Undo2,
   X
 } from 'lucide-vue-next'
 import {useI18n} from 'vue-i18n'
-import {ScreenshotService} from '@/services/ipc.js'
 import {parseErrorMessage} from '@/utils/errorHandler.js'
 import {
   computeMosaicBlockParams,
   constrainLinePoint,
   constrainRectPoint,
-  ensureShapeFillFields as ensureShapeFillFieldsImpl,
   hexToRgba,
-  nextNumberCalloutIndex as nextNumberCalloutIndexFromItems,
   resolveExportShapeFill
 } from '../../utils/screenshotAnnotation'
+import {useAnnotationTools} from './composables/useAnnotationTools'
+import {useSelectionRect} from './composables/useSelectionRect'
+import {useScreenshotCapture} from './composables/useScreenshotCapture'
+import {useManualLongshot} from './composables/useManualLongshot'
+import {useColorPicker} from './composables/useColorPicker'
 
 const {t} = useI18n()
 
-// 核心状态
-const state = ref('idle') // idle, selecting, selected, moving, resizing, drawing
-const screenshotSrc = ref('')
-const screenshotImg = ref(null)
-const canvas = ref(null)
-const windowHighlightRef = ref(null)
-const cutoutRef = ref(null)
-const floatingToolbarRef = ref(null)
-const pickerInfoRef = ref(null)
-const pickerMagnifierCanvasRef = ref(null)
-const isDrawing = ref(false)
-const isCaptureReady = ref(false)
-const captureReadyError = ref('')
 let captureReadyErrorTimer = null
 
 function showCaptureError(msg) {
@@ -688,115 +664,7 @@ function showCaptureError(msg) {
   }, 3000)
 }
 
-// 选区数据
-const rect = reactive({x: 0, y: 0, width: 0, height: 0})
-const startRect = reactive({x: 0, y: 0, width: 0, height: 0})
-const startPoint = reactive({x: 0, y: 0})
-const drawStart = reactive({x: 0, y: 0})
-let resizeHandleType = ''
 let currentDrawingSnapshot = null
-
-// 工具数据
-const currentTool = ref('select')
-const currentColor = ref('#ff0000')
-const lineWidth = ref(3)
-const shapeFillEnabled = ref(false)
-const shapeFillOpacity = ref(0.35)
-const mosaicSize = ref(8)
-const NUMBER_DEFAULT_RADIUS = 22
-const NUMBER_MIN_RADIUS = 14
-const SHAPE_TOOLS = ['line', 'arrow', 'rect', 'circle', 'number', 'redact']
-const FILLABLE_SHAPE_TOOLS = ['rect', 'circle', 'number', 'redact']
-const pickColor = ref('')
-const pickColorRgb = ref('')
-const pickerDisplayMode = ref('hex')
-const pickerCopyHint = ref(t('screenshot.pickerHint'))
-const textItems = ref([])
-const shapeItems = ref([])
-let textItemIdSeed = 1
-let shapeItemIdSeed = 1
-const editingTextId = ref(null)
-const selectedTextId = ref(null)
-const selectedShapeId = ref(null)
-const editingElementRef = ref(null)
-
-const showShapeFillControls = computed(() =>
-    FILLABLE_SHAPE_TOOLS.includes(currentTool.value) ||
-    FILLABLE_SHAPE_TOOLS.includes(String(shapeItems.value.find(s => s.id === selectedShapeId.value)?.type || ''))
-)
-const showMosaicSizeControl = computed(() => currentTool.value === 'mosaic')
-const selectedFillableShape = computed(() => {
-  const selected = shapeItems.value.find(s => s.id === selectedShapeId.value)
-  return selected && FILLABLE_SHAPE_TOOLS.includes(selected.type) ? selected : null
-})
-const showSecondaryTools = computed(() => {
-  if (currentTool.value !== 'select' && currentTool.value !== 'picker') return true
-  // 选中 rect/circle/number 时仍可改填充/透明度
-  return !!selectedFillableShape.value
-})
-const fillControlsActive = computed(() => {
-  if (selectedFillableShape.value) {
-    return !!selectedFillableShape.value.filled || selectedFillableShape.value.type === 'number'
-  }
-  return shapeFillEnabled.value || currentTool.value === 'number'
-})
-
-function applyShapeFillMutation(selected, filled, opacity) {
-  if (!selected) return
-  selected.filled = filled
-  selected.fillOpacity = filled ? opacity : 0
-  ensureShapeFillFields(selected)
-  appendVectorUpsertCommand('shape', selected)
-  saveToHistory()
-}
-
-function toggleShapeFill() {
-  const selected = selectedFillableShape.value
-  if (currentTool.value === 'number' || selected?.type === 'number') {
-    // 编号标注始终填充
-    return
-  }
-  if (selected) {
-    const nextFilled = !selected.filled
-    shapeFillEnabled.value = nextFilled
-    applyShapeFillMutation(
-        selected,
-        nextFilled,
-        nextFilled ? (Number(shapeFillOpacity.value) || 0.35) : 0
-    )
-    return
-  }
-  shapeFillEnabled.value = !shapeFillEnabled.value
-}
-
-function onShapeFillOpacityInput() {
-  const selected = selectedFillableShape.value
-  if (!selected || selected.type === 'number') return
-  if (!selected.filled) return
-  const op = Math.min(1, Math.max(0.05, Number(shapeFillOpacity.value) || 0.35))
-  selected.fillOpacity = op
-  appendVectorUpsertCommand('shape', selected)
-  saveToHistory()
-}
-
-function nextNumberCalloutIndex() {
-  return nextNumberCalloutIndexFromItems(shapeItems.value)
-}
-
-function ensureShapeFillFields(item) {
-  return ensureShapeFillFieldsImpl(item, nextNumberCalloutIndex())
-}
-const textOverlayRefMap = new Map()
-const editingBeforeText = ref('')
-const editingBeforeItem = ref(null)
-const fontFamilies = ['Arial', 'Microsoft YaHei', 'PingFang SC', 'Consolas', 'Times New Roman']
-const textStyle = reactive({
-  fontFamily: 'Arial',
-  bold: false,
-  stroke: false,
-  strokeColor: '#000000',
-  shadow: false
-})
 
 // 历史记录
 const history = ref([])
@@ -806,10 +674,6 @@ let vectorCommandLog = []
 let activeRasterCommand = null
 const regionConfirmAnchor = reactive({x: 0, y: 0, ready: false})
 
-// 窗口探测
-const windows = ref([])
-const highlightedWindow = ref(null)
-const windowCoordScale = ref(1)
 const captureOriginX = ref(0)
 const captureOriginY = ref(0)
 const hasScreenshotPayload = ref(false)
@@ -824,24 +688,12 @@ let fallbackRequestedWithoutSession = false
 let screenshotFallbackTimer = null
 const manualLongshotSessionId = ref(0)
 const manualLongshotRunning = ref(false)
-const manualLongshotPhase = ref('idle')
-const manualLongshotHint = ref('')
-const manualLongshotAvailability = reactive({
-  status: 'unknown',
-  phase: 'idle',
-  summary: '',
-  details: [],
-  sessionId: null
-})
-const longshotOverlayOnly = ref(false)
 const longshotResultActive = ref(false)
 const longshotRawPngBase64 = ref('')
 const sourceImagePath = ref('')
 const overlayDirty = ref(false)
 const longshotViewScale = ref(1)
 const longshotViewOffset = reactive({x: 0, y: 0})
-const pendingLongshotBorderAnchor = ref(null)
-const longshotBorderShown = ref(false)
 let unlistenManualLongshotProgress = null
 let unlistenManualLongshotLifecycle = null
 let unlistenManualLongshotFirstFrame = null
@@ -855,60 +707,239 @@ let manualLongshotAvailabilityRefreshTimer = null
 // 物理像素比例
 const dpr = window.devicePixelRatio || 1
 
-// 定义工具
-const drawingTools = [
-  {id: 'select', name: 'screenshot.selectMove', icon: MousePointer2},
-  {id: 'pen', name: 'screenshot.brush', icon: Pencil},
-  {id: 'highlight', name: 'screenshot.highlight', icon: Highlighter},
-  {id: 'line', name: 'screenshot.line', icon: Minus},
-  {id: 'arrow', name: 'screenshot.arrow', icon: ArrowUpRight},
-  {id: 'rect', name: 'screenshot.rectangle', icon: Square},
-  {id: 'circle', name: 'screenshot.circle', icon: Circle},
-  {id: 'number', name: 'screenshot.numberCallout', icon: Hash},
-  {id: 'redact', name: 'screenshot.redact', icon: EyeOff},
-  {id: 'text', name: 'screenshot.text', icon: Type},
-  {id: 'mosaic', name: 'screenshot.mosaic', icon: Grid3x3},
-  {id: 'picker', name: 'screenshot.colorPicker', icon: Pipette}
-]
 const isDevMode = import.meta.env.DEV
 
-const hasSelection = computed(() => rect.width > 0 && rect.height > 0)
-const canExport = computed(() => hasSelection.value)
-const canCropToSelection = computed(() =>
-    regionSelectMode.value === 'screenshot' &&
-    hasSelection.value &&
-    state.value === 'selected' &&
-    !longshotResultActive.value &&
-    (currentTool.value === 'select' || SHAPE_TOOLS.includes(currentTool.value) || currentTool.value === 'pen' || currentTool.value === 'highlight' || currentTool.value === 'text' || currentTool.value === 'mosaic')
-)
+// ========== 按域抽取的 composables ==========
+const {
+  currentTool,
+  currentColor,
+  lineWidth,
+  shapeFillEnabled,
+  shapeFillOpacity,
+  mosaicSize,
+  NUMBER_DEFAULT_RADIUS,
+  NUMBER_MIN_RADIUS,
+  SHAPE_TOOLS,
+  textItems,
+  shapeItems,
+  editingTextId,
+  selectedTextId,
+  selectedShapeId,
+  editingElementRef,
+  showShapeFillControls,
+  showMosaicSizeControl,
+  showSecondaryTools,
+  fillControlsActive,
+  textOverlayRefMap,
+  editingBeforeItem,
+  fontFamilies,
+  textStyle,
+  drawingTools,
+  setTextOverlayRef,
+  toggleShapeFill,
+  onShapeFillOpacityInput,
+  nextNumberCalloutIndex,
+  startCreateTextItem,
+  startEditTextItem,
+  setEditingElementRef,
+  onInlineTextInput,
+  handleInlineEditorKeydown,
+  finishInlineEdit,
+  cancelInlineEdit,
+  syncFillControlsFromShape,
+  handleResizeShapeItem,
+  handleAdjustLineEndpoint,
+  createShapeItem,
+  getShapeItemStyle,
+  getShapeStrokeStyle,
+  getShapeFillStyle,
+  getShapeNumberStyle,
+  getShapeLineViewBox,
+  getShapePointHandleStyle,
+  toggleTextBold,
+  toggleTextStroke,
+  toggleTextShadow,
+  syncEditingTextStyle,
+  getTextItemStyle,
+  cloneTextItem,
+  cloneShapeItem,
+  areFlatItemsEqual,
+  drawArrowHead,
+  movingTextStart,
+  movingShapeStart,
+  resizingShapeStart,
+  adjustingLinePointStart
+} = useAnnotationTools({
+  toScenePoint,
+  longshotResultActive,
+  longshotViewScale,
+  longshotViewOffset,
+  getTextCreationBounds,
+  appendVectorUpsertCommand,
+  appendVectorDeleteCommand,
+  saveToHistory
+})
 
-async function resolveCropDataUrl() {
-  // asset:// 等会污染 canvas；有后端源路径时走 render，避免 toDataURL SecurityError
-  if (sourceImagePath.value) {
-    const renderResult = await invoke(IPC_COMMANDS.RENDER_SCREENSHOT_TO_PNG_DATA, {
-      request: buildBackendExportRequest('')
-    })
-    if (!renderResult?.success || !renderResult?.pngBase64) {
-      throw new Error(renderResult?.error || renderResult?.message || t('screenshot.cropUnavailable'))
-    }
-    return {
-      dataUrl: `data:image/png;base64,${renderResult.pngBase64}`,
-      cssW: Math.max(1, Number(renderResult.width || 0) / dpr),
-      cssH: Math.max(1, Number(renderResult.height || 0) / dpr)
-    }
-  }
-  if (!isPixelCtxReadable()) {
-    try {
-      await loadScreenshotPixelFromBlob(screenshotSrc.value, {reset: false})
-    } catch (_) { /* fall through to canvas path */ }
-  }
-  const cropCanvas = getCroppedCanvas()
-  return {
-    dataUrl: cropCanvas.toDataURL('image/png'),
-    cssW: Math.max(1, cropCanvas.width / dpr),
-    cssH: Math.max(1, cropCanvas.height / dpr)
-  }
-}
+const {
+  state,
+  rect,
+  startRect,
+  startPoint,
+  drawStart,
+  isDrawing,
+  windowHighlightRef,
+  cutoutRef,
+  floatingToolbarRef,
+  highlightedWindow,
+  hasSelection,
+  cutoutStyle,
+  sizeInfoStyle,
+  selectionInfoText,
+  recordingConfirmStyle,
+  windowHighlightStyle,
+  toolbarStyle,
+  adjustToolbarPosition,
+  editorCursorClass,
+  isInside,
+  isInsideBorder,
+  detectWindowAt,
+  fetchWindows,
+  startResize,
+  handleResize
+} = useSelectionRect({
+  toScenePoint,
+  dpr,
+  regionConfirmAnchor,
+  currentTool,
+  longshotResultActive,
+  captureOriginX,
+  captureOriginY,
+  onMouseDown
+})
+
+const {
+  screenshotSrc,
+  screenshotImg,
+  canvas,
+  isCaptureReady,
+  captureReadyError,
+  canExport,
+  canCropToSelection,
+  showExportRouteIndicator,
+  exportRouteIndicator,
+  revokeScreenshotObjectUrl,
+  loadScreenshotSession,
+  initCanvas,
+  loadImageFromBase64,
+  loadImageFromPath,
+  getGlobalSelectionRect,
+  getLongshotImageViewportRect,
+  getLongshotFullCanvas,
+  sceneToImagePoint,
+  drawShapeItemsOnCroppedCanvas,
+  drawTextItemsOnCroppedCanvas,
+  copyToClipboardLinked,
+  completeAndCopyUnlinked,
+  pinToScreenAndClose,
+  saveAndClose,
+  commitRecordingRegionSelection,
+  onContextMenu,
+  resolveCropDataUrl
+} = useScreenshotCapture({
+  t,
+  dpr,
+  isDevMode,
+  sourceImagePath,
+  longshotResultActive,
+  longshotRawPngBase64,
+  longshotViewScale,
+  longshotViewOffset,
+  overlayDirty,
+  regionSelectMode,
+  manualLongshotSessionId,
+  manualLongshotRunning,
+  captureOriginX,
+  captureOriginY,
+  activeSessionId,
+  payloadSessionId,
+  screenshotSessionRequested,
+  hasScreenshotPayload,
+  fetchWindows,
+  state,
+  rect,
+  currentTool,
+  textItems,
+  shapeItems,
+  hasSelection,
+  SHAPE_TOOLS,
+  getCroppedCanvas,
+  buildBackendExportRequest,
+  requestScreenshot,
+  showCaptureError,
+  saveToHistory,
+  isPixelCtxReadable,
+  loadScreenshotPixelFromBlob,
+  loadImageFromSrc,
+  close
+})
+
+const {
+  manualLongshotAvailability,
+  manualLongshotPhase,
+  manualLongshotHint,
+  longshotOverlayOnly,
+  pendingLongshotBorderAnchor,
+  longshotBorderShown,
+  refreshManualLongshotAvailability,
+  cleanupManualLongshotUi,
+  applyManualLongshotPhase,
+  toggleManualLongshotRunning,
+  finishManualLongshotCapture,
+  cancelManualLongshotCapture,
+  applyManualLongshotResult,
+  sceneLayerStyle,
+  onMouseWheel,
+  manualLongshotButtonTitle
+} = useManualLongshot({
+  t,
+  regionSelectMode,
+  sourceImagePath,
+  longshotResultActive,
+  longshotRawPngBase64,
+  longshotViewScale,
+  longshotViewOffset,
+  manualLongshotSessionId,
+  manualLongshotRunning,
+  state,
+  rect,
+  scheduleManualLongshotAvailabilityRefresh,
+  getGlobalSelectionRect,
+  loadImageFromBase64,
+  loadImageFromPath
+})
+
+const {
+  pickColor,
+  pickColorRgb,
+  pickerDisplayMode,
+  pickerCopyHint,
+  pickerInfoRef,
+  pickerMagnifierCanvasRef,
+  pickerDisplayValue,
+  pickerStyle,
+  pickColorAtScene,
+  copyPickedColor
+} = useColorPicker({
+  t,
+  dpr,
+  drawStart,
+  isDrawing,
+  currentColor,
+  currentTool,
+  toScenePoint,
+  getMergedPixelColorAt,
+  renderPickerMagnifier
+})
 
 async function applyCropToSelection() {
   if (!canCropToSelection.value) {
@@ -951,132 +982,6 @@ async function applyCropToSelection() {
     showCaptureError(String(err?.message || err || t('screenshot.cropUnavailable')))
   }
 }
-const showExportRouteIndicator = computed(() =>
-    isDevMode &&
-    regionSelectMode.value === 'screenshot' &&
-    hasSelection.value &&
-    (state.value === 'selected' || state.value === 'drawing')
-)
-const exportRouteIndicator = computed(() => {
-  const sourcePath = String(sourceImagePath.value || '').trim()
-  const hasBackendPath = !!sourcePath
-  const displaySource = hasBackendPath
-      ? `imagePath -> objectURL 显示 (${getPathBasename(sourcePath)})`
-      : (screenshotSrc.value?.startsWith('data:image/')
-          ? 'fallback -> data:image/base64 显示'
-          : (screenshotSrc.value ? 'fallback -> 内存 URL 显示' : '未就绪'))
-  const rawLongshotAvailable = longshotResultActive.value && !!longshotRawPngBase64.value && !hasOverlayForLongshotExport()
-  const fallbackExport = rawLongshotAvailable ? 'fallback -> 原始长图 base64' : 'fallback -> canvas/base64'
-  const saveRoute = hasBackendPath ? 'imagePath -> 后端导出' : fallbackExport
-  const copyRoute = hasBackendPath ? 'imagePath -> 后端剪贴板' : 'fallback -> 浏览器剪贴板'
-  const pinRoute = hasBackendPath ? 'imagePath -> 后端渲染 PNG' : fallbackExport
-  if (sourcePath) {
-    return {
-      kind: 'backend',
-      items: [
-        {key: 'display', label: t('screenshot.source'), value: displaySource},
-        {key: 'save', label: t('screenshot.linkSave'), value: saveRoute},
-        {key: 'copy', label: t('screenshot.linkCopy'), value: copyRoute},
-        {key: 'pin', label: t('screenshot.linkPin'), value: pinRoute},
-        {key: 'path', label: t('screenshot.linkCurrentPath'), value: sourcePath}
-      ]
-    }
-  }
-  return {
-    kind: 'fallback',
-    items: [
-      {key: 'display', label: t('screenshot.source'), value: displaySource},
-      {key: 'save', label: t('screenshot.linkSave'), value: saveRoute},
-      {key: 'copy', label: t('screenshot.linkCopy'), value: copyRoute},
-      {key: 'pin', label: t('screenshot.linkPin'), value: pinRoute},
-      {key: 'path', label: t('screenshot.linkCurrentPath'), value: t('screenshot.linkMemoryFallback')}
-    ]
-  }
-})
-const manualLongshotButtonTitle = computed(() => {
-  if (manualLongshotAvailability.status === 'available') return t('screenshot.longshot')
-  if (manualLongshotAvailability.status === 'busy') return t('screenshot.longshotRunning')
-  return manualLongshotAvailability.summary || t('screenshot.longshotUnavailable')
-})
-const selectionInfoText = computed(() => {
-  const width = Math.max(0, Math.round(rect.width * dpr))
-  const height = Math.max(0, Math.round(rect.height * dpr))
-  if (width <= 0 || height <= 0) {
-    return `${width} × ${height} px`
-  }
-  return `${width} × ${height} px (${getAspectRatioText(width, height)})`
-})
-const recordingConfirmStyle = computed(() => {
-  const margin = 8
-  const panelWidth = 168
-  const panelHeight = 32
-  const defaultX = regionConfirmAnchor.ready
-      ? Math.round(regionConfirmAnchor.x)
-      : Math.round(rect.x + rect.width - panelWidth)
-  const defaultY = regionConfirmAnchor.ready
-      ? Math.round(regionConfirmAnchor.y)
-      : (rect.y > panelHeight + 12 ? Math.round(rect.y - panelHeight - margin) : Math.round(rect.y + rect.height + margin))
-  const x = Math.max(margin, Math.min(window.innerWidth - panelWidth - margin, defaultX))
-  const y = defaultY
-  const top = Math.max(margin, Math.min(window.innerHeight - panelHeight - margin, y))
-  return {
-    left: `${x}px`,
-    top: `${top}px`
-  }
-})
-
-const sizeInfoStyle = computed(() => {
-  if (rect.y < 24) {
-    return { top: '4px', left: '4px' }
-  }
-  return { top: '-24px', left: '0' }
-})
-const pickerDisplayValue = computed(() => {
-  return pickerDisplayMode.value === 'rgb' ? pickColorRgb.value : pickColor.value
-})
-
-function getAspectRatioText(width, height) {
-  const divisor = getGreatestCommonDivisor(width, height)
-  const ratioWidth = Math.round(width / divisor)
-  const ratioHeight = Math.round(height / divisor)
-  return `${ratioWidth}:${ratioHeight}`
-}
-
-function getGreatestCommonDivisor(a, b) {
-  let x = Math.abs(Math.trunc(a))
-  let y = Math.abs(Math.trunc(b))
-  while (y !== 0) {
-    const temp = y
-    y = x % y
-    x = temp
-  }
-  return x || 1
-}
-
-function getPathBasename(filePath) {
-  const normalized = String(filePath || '').replace(/\\/g, '/')
-  const parts = normalized.split('/')
-  return parts[parts.length - 1] || normalized
-}
-
-async function refreshManualLongshotAvailability() {
-  try {
-    const payload = await ScreenshotService.getManualLongshotAvailability()
-    manualLongshotAvailability.status = payload?.status || 'unknown'
-    manualLongshotAvailability.phase = payload?.phase || 'idle'
-    manualLongshotAvailability.summary = payload?.summary || ''
-    manualLongshotAvailability.details = Array.isArray(payload?.details) ? payload.details : []
-    manualLongshotAvailability.sessionId = payload?.sessionId ?? null
-    manualLongshotPhase.value = manualLongshotAvailability.phase
-  } catch (error) {
-    manualLongshotAvailability.status = 'unknown'
-    manualLongshotAvailability.phase = 'idle'
-    manualLongshotAvailability.summary = String(error || t('screenshot.longshotStatusFailed'))
-    manualLongshotAvailability.details = []
-    manualLongshotAvailability.sessionId = null
-    manualLongshotPhase.value = 'idle'
-  }
-}
 
 function scheduleManualLongshotAvailabilityRefresh(delay = 180) {
   if (manualLongshotAvailabilityRefreshTimer) {
@@ -1089,74 +994,15 @@ function scheduleManualLongshotAvailabilityRefresh(delay = 180) {
   }, delay)
 }
 
-function cleanupManualLongshotUi(restoreVisibility = true) {
-  manualLongshotRunning.value = false
-  manualLongshotSessionId.value = 0
-  longshotOverlayOnly.value = false
-  pendingLongshotBorderAnchor.value = null
-  longshotBorderShown.value = false
-  regionSelectMode.value = 'screenshot'
-  if (restoreVisibility) {
-    invoke(IPC_COMMANDS.SET_SCREENSHOT_WINDOW_VISIBLE, {visible: true}).catch(() => {
-    })
-  }
-  invoke(IPC_COMMANDS.HIDE_LONGSHOT_BORDER).catch(() => {
-  })
-  invoke(IPC_COMMANDS.HIDE_LONGSHOT_TOOLBAR).catch(() => {
-  })
-  scheduleManualLongshotAvailabilityRefresh()
-}
-
-function applyManualLongshotPhase(payload = {}) {
-  const phase = String(payload.phase || '')
-  const userMessage = String(payload.userMessage || '')
-  if (phase) {
-    manualLongshotPhase.value = phase
-  }
-  if (phase === 'paused') {
-    manualLongshotRunning.value = false
-  } else if (phase === 'running' || phase === 'starting' || phase === 'finishing') {
-    manualLongshotRunning.value = true
-  } else if (phase === 'canceling' || phase === 'done' || phase === 'failed') {
-    manualLongshotRunning.value = false
-  }
-  if (userMessage) {
-    manualLongshotHint.value = userMessage
-  }
-}
-
 let screenshotPixelCanvas = null
 let screenshotPixelCtx = null
 /** 无 CORS 污染的位图源（blob/createImageBitmap），马赛克/取色采样用 */
 let screenshotBitmap = null
 let screenshotPixelBlobLoadPromise = null
-let screenshotObjectUrl = ''
-const movingTextStart = reactive({x: 0, y: 0, itemX: 0, itemY: 0, id: 0})
-const movingShapeStart = reactive({x: 0, y: 0, itemX: 0, itemY: 0, id: 0})
-const resizingShapeStart = reactive({x: 0, y: 0, itemX: 0, itemY: 0, itemWidth: 0, itemHeight: 0, handle: '', id: 0})
-const adjustingLinePointStart = reactive({id: 0, point: 'start'})
 let movingTextBeforeItem = null
 let movingShapeBeforeItem = null
 let resizingShapeBeforeItem = null
 let adjustingLineBeforeItem = null
-
-// 样式计算
-const editorCursorClass = computed(() => {
-  if (longshotResultActive.value && currentTool.value === 'select') return 'grab'
-  if (state.value === 'idle' || state.value === 'selecting') return 'crosshair'
-  if (currentTool.value !== 'select') return 'crosshair'
-  return 'default'
-})
-
-const sceneLayerStyle = computed(() => {
-  if (!longshotResultActive.value) {
-    return {}
-  }
-  return {
-    transformOrigin: '0 0',
-    transform: `translate(${longshotViewOffset.x}px, ${longshotViewOffset.y}px) scale(${longshotViewScale.value})`
-  }
-})
 
 function toScenePoint(event) {
   if (!longshotResultActive.value) {
@@ -1177,126 +1023,6 @@ function sceneToDisplayPoint(x, y) {
   return {
     x: x * scale + longshotViewOffset.x,
     y: y * scale + longshotViewOffset.y
-  }
-}
-
-function onMouseWheel(event) {
-  if (!longshotResultActive.value) return
-  const delta = event.deltaY < 0 ? 1.12 : 0.89
-  const oldScale = longshotViewScale.value
-  const nextScale = Math.max(0.35, Math.min(4, oldScale * delta))
-  if (Math.abs(nextScale - oldScale) < 0.0001) return
-  const anchorX = event.clientX
-  const anchorY = event.clientY
-  const sceneX = (anchorX - longshotViewOffset.x) / oldScale
-  const sceneY = (anchorY - longshotViewOffset.y) / oldScale
-  longshotViewScale.value = nextScale
-  longshotViewOffset.x = anchorX - sceneX * nextScale
-  longshotViewOffset.y = anchorY - sceneY * nextScale
-}
-
-const cutoutStyle = computed(() => {
-  return {
-    left: `${rect.x}px`,
-    top: `${rect.y}px`,
-    width: `${rect.width}px`,
-    height: `${rect.height}px`
-  }
-})
-
-const windowHighlightStyle = computed(() => {
-  if (!highlightedWindow.value) return {}
-  return {
-    left: `${highlightedWindow.value.x}px`,
-    top: `${highlightedWindow.value.y}px`,
-    width: `${highlightedWindow.value.width}px`,
-    height: `${highlightedWindow.value.height}px`
-  }
-})
-
-const toolbarStyle = computed(() => {
-  let top = rect.y + rect.height + 10
-  let right = window.innerWidth - (rect.x + rect.width)
-
-
-  if (top + 100 > window.innerHeight) {
-    top = rect.y - 60
-    if (currentTool.value !== 'select' && currentTool.value !== 'picker') {
-      top -= 40
-    }
-  }
-
-  if (top < 0) {
-    top = Math.max(10, rect.y + rect.height - 60 - 10)
-  }
-
-  const estimatedToolbarHeight = 80
-  if (top + estimatedToolbarHeight > window.innerHeight) {
-    top = Math.max(10, window.innerHeight - estimatedToolbarHeight)
-  }
-
-  if (right < 10) right = 10
-
-  return {
-    top: `${top}px`,
-    right: `${right}px`
-  }
-})
-
-function adjustToolbarPosition() {
-  const toolbar = floatingToolbarRef.value
-  if (!toolbar) return
-
-  const toolbarRect = toolbar.getBoundingClientRect()
-  const toolbarWidth = toolbarRect.width
-  const toolbarLeft = toolbarRect.left
-
-  // 如果工具栏超出屏幕左侧
-  if (toolbarLeft < 0) {
-    const newRight = window.innerWidth - toolbarWidth - 10
-    toolbar.style.right = `${Math.max(10, newRight)}px`
-  }
-
-  // 如果工具栏超出屏幕右侧
-  if (toolbarLeft + toolbarWidth > window.innerWidth) {
-    toolbar.style.right = '10px'
-  }
-}
-
-const pickerStyle = computed(() => {
-  // 取色器实际尺寸：放大镜 132px + gap 8px + meta ~130px ≈ 270px 宽，132px 高
-  const pickerWidth = 276
-  const pickerHeight = 140
-  const margin = 16
-
-  // 优先显示在鼠标右下方
-  let left = drawStart.x + margin
-  let top = drawStart.y + margin
-
-  // 右溢出：改到鼠标左侧
-  if (left + pickerWidth > window.innerWidth - margin) {
-    left = drawStart.x - pickerWidth - margin
-  }
-  // 下溢出：改到鼠标上方
-  if (top + pickerHeight > window.innerHeight - margin) {
-    top = drawStart.y - pickerHeight - margin
-  }
-  // 边界兜底
-  left = Math.max(margin, Math.min(left, window.innerWidth - pickerWidth - margin))
-  top = Math.max(margin, Math.min(top, window.innerHeight - pickerHeight - margin))
-
-  return {
-    left: `${left}px`,
-    top: `${top}px`
-  }
-})
-
-function setTextOverlayRef(el, id) {
-  if (!id) return
-  if (el) {
-    textOverlayRefMap.set(id, el)
-  } else {
-    textOverlayRefMap.delete(id)
   }
 }
 
@@ -1551,45 +1277,6 @@ function handleScreenshotReset() {
   longshotViewOffset.y = 0
 }
 
-async function loadScreenshotSession() {
-  try {
-    const result = await invoke(IPC_COMMANDS.GET_SCREENSHOT_DATA)
-    if (result?.success && result.image_path) {
-      sourceImagePath.value = String(result.image_path || '')
-      captureOriginX.value = Number(result.origin_x) || 0
-      captureOriginY.value = Number(result.origin_y) || 0
-      const sessionId = Number(result.session_id) || 0
-      if (sessionId > 0) {
-        activeSessionId.value = sessionId
-        payloadSessionId.value = sessionId
-      }
-      screenshotSessionRequested.value = true
-      hasScreenshotPayload.value = true
-      await fetchWindows()
-      regionSelectMode.value = String(result.selection_mode || 'screenshot')
-      state.value = 'idle'
-      currentTool.value = 'select'
-      rect.width = 0
-      rect.height = 0
-      manualLongshotSessionId.value = 0
-      manualLongshotRunning.value = false
-      longshotResultActive.value = false
-      longshotRawPngBase64.value = ''
-      longshotViewScale.value = 1
-      longshotViewOffset.x = 0
-      longshotViewOffset.y = 0
-      loadImageFromPath(result.image_path)
-      // 图片开始加载，显示窗口
-      invoke(IPC_COMMANDS.SET_SCREENSHOT_WINDOW_VISIBLE, {visible: true}).catch(() => {
-      })
-      return
-    }
-    // 无会话数据，窗口为预创建状态，不显示
-  } catch (e) {
-    console.error('加载截图会话失败:', e)
-  }
-}
-
 function scheduleScreenshotFallback() {
   if (!screenshotSessionRequested.value || hasScreenshotPayload.value) return
   if (screenshotFallbackTimer) {
@@ -1623,35 +1310,6 @@ function scheduleScreenshotFallback() {
       }
     }
   }, 120)
-}
-
-async function fetchWindows() {
-  try {
-    const result = await invoke(IPC_COMMANDS.GET_WINDOW_LIST)
-    if (result.success) {
-      const list = result.windows || []
-      const maxWidth = list.reduce((max, item) => Math.max(max, Number(item?.width) || 0), 0)
-      windowCoordScale.value = maxWidth > window.innerWidth * 1.15 ? dpr : 1
-      windows.value = (result.windows || []).map(normalizeWindowRectToViewport)
-    }
-  } catch (error) {
-    console.error('获取窗口失败:', error)
-  }
-}
-
-function normalizeWindowRectToViewport(w) {
-  const scale = windowCoordScale.value || 1
-  const rawX = Number(w?.x) || 0
-  const rawY = Number(w?.y) || 0
-  const rawWidth = Number(w?.width) || 0
-  const rawHeight = Number(w?.height) || 0
-  return {
-    ...w,
-    x: (rawX - captureOriginX.value) / scale,
-    y: (rawY - captureOriginY.value) / scale,
-    width: rawWidth / scale,
-    height: rawHeight / scale
-  }
 }
 
 async function requestScreenshot() {
@@ -1750,145 +1408,6 @@ function handleStartRegionSelect(event) {
       : ''
 }
 
-async function toggleManualLongshotRunning() {
-  try {
-    if (manualLongshotSessionId.value <= 0) {
-      const region = getGlobalSelectionRect()
-      longshotOverlayOnly.value = false
-      pendingLongshotBorderAnchor.value = region
-      longshotBorderShown.value = false
-      await invoke(IPC_COMMANDS.SET_SCREENSHOT_WINDOW_VISIBLE, {visible: false})
-
-      await new Promise(resolve => setTimeout(resolve, 80))
-      const result = await ScreenshotService.startManualLongshot({
-        region,
-        fps: 10,
-        minConfidence: 0.65,
-        maxDurationSec: 120,
-        previewIntervalMs: 300
-      })
-      const sid = Number(result?.sessionId || 0)
-      if (sid > 0) {
-        manualLongshotSessionId.value = sid
-        manualLongshotRunning.value = true
-        manualLongshotPhase.value = 'starting'
-        await invoke(IPC_COMMANDS.SHOW_LONGSHOT_TOOLBAR, {anchor: region})
-        manualLongshotHint.value = t('screenshot.longshotStarted')
-      } else {
-        await invoke(IPC_COMMANDS.SET_SCREENSHOT_WINDOW_VISIBLE, {visible: true}).catch(() => {
-        })
-        pendingLongshotBorderAnchor.value = null
-        longshotBorderShown.value = false
-      }
-      return
-    }
-    if (manualLongshotRunning.value) {
-      await ScreenshotService.pauseManualLongshot(manualLongshotSessionId.value)
-      manualLongshotRunning.value = false
-      manualLongshotPhase.value = 'paused'
-      manualLongshotHint.value = t('screenshot.longshotPaused')
-    } else {
-      await ScreenshotService.resumeManualLongshot(manualLongshotSessionId.value)
-      manualLongshotRunning.value = true
-      manualLongshotPhase.value = 'running'
-      manualLongshotHint.value = t('screenshot.longshotResumed')
-    }
-  } catch (error) {
-    await invoke(IPC_COMMANDS.SET_SCREENSHOT_WINDOW_VISIBLE, {visible: true}).catch(() => {})
-    cleanupManualLongshotUi(false)
-    manualLongshotPhase.value = 'failed'
-    manualLongshotHint.value = t('screenshot.longshotOpFailed', {error: parseErrorMessage(String(error)) || String(error)})
-  }
-}
-
-async function finishManualLongshotCapture() {
-  if (manualLongshotSessionId.value <= 0) return
-  try {
-    const sessionId = manualLongshotSessionId.value
-    await invoke(IPC_COMMANDS.SET_SCREENSHOT_WINDOW_VISIBLE, {visible: true})
-    cleanupManualLongshotUi(false)
-    const result = await ScreenshotService.finishManualLongshot(sessionId)
-    applyManualLongshotResult(result || {})
-  } catch (error) {
-    cleanupManualLongshotUi(true)
-    manualLongshotHint.value = t('screenshot.longshotFinishFailed', {error: parseErrorMessage(String(error)) || String(error)})
-  }
-}
-
-function cancelManualLongshotCapture(updateHint = true, restoreVisibility = true) {
-  const sid = manualLongshotSessionId.value
-  const hadLongshotRuntime =
-      sid > 0 ||
-      longshotOverlayOnly.value ||
-      !!pendingLongshotBorderAnchor.value ||
-      longshotBorderShown.value
-  manualLongshotRunning.value = false
-  manualLongshotPhase.value = 'canceling'
-  manualLongshotSessionId.value = 0
-  cleanupManualLongshotUi(restoreVisibility && hadLongshotRuntime)
-  if (sid > 0) {
-    ScreenshotService.cancelManualLongshot(sid).catch(() => {
-    })
-  }
-  if (updateHint) {
-    manualLongshotHint.value = t('screenshot.longshotCancelled')
-  }
-}
-
-function applyManualLongshotResult(result) {
-  const base64 = String(result?.pngBase64 || result?.png_base64 || '')
-  const imagePath = String(result?.imagePath || result?.image_path || '')
-  if (!base64 && !imagePath) {
-    throw new Error(t('screenshot.longshotNoResult'))
-  }
-  if (base64) {
-    loadImageFromBase64(base64)
-  } else if (imagePath) {
-    loadImageFromPath(imagePath)
-  }
-  longshotResultActive.value = true
-  longshotRawPngBase64.value = base64
-  sourceImagePath.value = imagePath
-  longshotViewScale.value = 1
-  longshotViewOffset.x = 0
-  longshotViewOffset.y = 0
-  regionSelectMode.value = 'screenshot'
-  state.value = 'selected'
-  rect.x = 0
-  rect.y = 0
-  rect.width = window.innerWidth
-  rect.height = window.innerHeight
-  manualLongshotSessionId.value = 0
-  manualLongshotRunning.value = false
-  manualLongshotPhase.value = 'done'
-  cleanupManualLongshotUi(true)
-  manualLongshotHint.value = ''
-}
-
-function hasOverlayForLongshotExport() {
-  return overlayDirty.value
-}
-
-function base64ToBlob(base64, mime = 'image/png') {
-  const binary = atob(base64)
-  const len = binary.length
-  const bytes = new Uint8Array(len)
-  for (let i = 0; i < len; i++) {
-    bytes[i] = binary.charCodeAt(i)
-  }
-  return new Blob([bytes], {type: mime})
-}
-
-function resolveExportBase64() {
-  if (longshotResultActive.value && longshotRawPngBase64.value && !hasOverlayForLongshotExport()) {
-
-    return longshotRawPngBase64.value
-  }
-  const cropCanvas = getCroppedCanvas()
-  const dataUrl = cropCanvas.toDataURL('image/png')
-  return dataUrl.split(',')[1]
-}
-
 function buildBackendExportRequest(outputPath) {
   return {
     sourceImagePath: sourceImagePath.value,
@@ -1943,50 +1462,6 @@ function buildBackendExportRequest(outputPath) {
           ? command.points.map((point) => ({x: point.x, y: point.y}))
           : []
     }))
-  }
-}
-
-async function commitRecordingRegionSelection() {
-  const payload = getGlobalSelectionRect()
-  try {
-    await invoke(IPC_COMMANDS.NOTIFY_RECORDING_REGION_SELECTED, {payload})
-  } catch (_e) {
-    await emit('recording-region-selected', payload)
-  }
-  await close()
-}
-
-function getGlobalSelectionRect() {
-  const viewportW = Math.max(1, Number(window.innerWidth) || 1)
-  const viewportH = Math.max(1, Number(window.innerHeight) || 1)
-  const imageW = Math.max(1, Number(screenshotImg.value?.width) || viewportW)
-  const imageH = Math.max(1, Number(screenshotImg.value?.height) || viewportH)
-  const scaleX = imageW / viewportW
-  const scaleY = imageH / viewportH
-  const rawX = Math.round(captureOriginX.value + rect.x * scaleX)
-  const rawY = Math.round(captureOriginY.value + rect.y * scaleY)
-  const rawW = Math.max(1, Math.round(rect.width * scaleX))
-  const rawH = Math.max(1, Math.round(rect.height * scaleY))
-  const minX = Math.round(captureOriginX.value)
-  const minY = Math.round(captureOriginY.value)
-  const maxX = minX + imageW
-  const maxY = minY + imageH
-  const x = Math.max(minX, Math.min(maxX - 1, rawX))
-  const y = Math.max(minY, Math.min(maxY - 1, rawY))
-  const width = Math.max(1, Math.min(maxX - x, rawW))
-  const height = Math.max(1, Math.min(maxY - y, rawH))
-  return {
-    x,
-    y,
-    width,
-    height,
-  }
-}
-
-function revokeScreenshotObjectUrl() {
-  if (screenshotObjectUrl) {
-    URL.revokeObjectURL(screenshotObjectUrl)
-    screenshotObjectUrl = ''
   }
 }
 
@@ -2124,22 +1599,6 @@ async function loadScreenshotPixelFromBlob(src, {reset = true} = {}) {
   return screenshotPixelBlobLoadPromise
 }
 
-function loadImageFromBase64(base64Data) {
-  loadImageFromSrc(`data:image/png;base64,${base64Data}`)
-}
-
-function loadImageFromPath(imagePath) {
-  const fileUrl = buildFileUrlFromPath(imagePath)
-  if (!fileUrl) {
-    console.error('❌ 无法构建文件URL:', imagePath)
-    isCaptureReady.value = false
-    return
-  }
-
-  revokeScreenshotObjectUrl()
-  loadImageFromSrc(fileUrl)
-}
-
 function resetAnnotationStateForNewImage() {
   revokeScreenshotObjectUrl()
   finishInlineEdit()
@@ -2159,54 +1618,6 @@ function resetAnnotationStateForNewImage() {
   adjustingLineBeforeItem = null
   currentDrawingSnapshot = null
   overlayDirty.value = false
-}
-
-function initCanvas() {
-  if (!canvas.value || !screenshotImg.value) return
-
-  canvas.value.width = window.innerWidth * dpr
-  canvas.value.height = window.innerHeight * dpr
-
-  const ctx = canvas.value.getContext('2d')
-  if (!ctx) return
-
-  ctx.scale(dpr, dpr)
-
-
-  saveToHistory()
-  isCaptureReady.value = true
-}
-
-async function ensureCaptureReady() {
-  if (isCaptureReady.value && screenshotImg.value && canvas.value && canvas.value.width > 0 && canvas.value.height > 0) {
-    return true
-  }
-  if (!screenshotImg.value && !screenshotSrc.value) {
-    await requestScreenshot()
-  }
-  if (!screenshotImg.value && screenshotSrc.value) {
-    try {
-      const img = new Image()
-      await new Promise((resolve, reject) => {
-        img.onload = resolve
-        img.onerror = reject
-        img.src = screenshotSrc.value
-      })
-      screenshotImg.value = img
-    } catch (err) {
-      console.error('加载截图源图失败:', err)
-    }
-  }
-  await nextTick()
-  if (screenshotImg.value && canvas.value) {
-    initCanvas()
-  }
-  return Boolean(isCaptureReady.value && screenshotImg.value && canvas.value && canvas.value.width > 0 && canvas.value.height > 0)
-}
-
-// 鼠标交互逻辑
-function onBorderMouseDown(e) {
-  onMouseDown(e)
 }
 
 function onMouseDown(e) {
@@ -2439,10 +1850,6 @@ function onMouseUp(e) {
   }
 }
 
-function onContextMenu(e) {
-  close()
-}
-
 function cancelSelection() {
   if (manualLongshotSessionId.value > 0) {
     cancelManualLongshotCapture(true)
@@ -2460,84 +1867,6 @@ function cancelSelection() {
     historyIndex.value = 0
     restoreFromHistory()
   }
-}
-
-// 辅助函数
-function isInside(x, y, r) {
-  return x >= r.x && x <= r.x + r.width && y >= r.y && y <= r.y + r.height
-}
-
-function isInsideBorder(x, y, r, borderThreshold = 4) {
-  if (!isInside(x, y, r)) return false
-  if (!r.width || !r.height) return false
-  const nearLeft = x - r.x < borderThreshold
-  const nearRight = (r.x + r.width) - x < borderThreshold
-  const nearTop = y - r.y < borderThreshold
-  const nearBottom = (r.y + r.height) - y < borderThreshold
-  return nearLeft || nearRight || nearTop || nearBottom
-}
-
-function detectWindowAt(x, y) {
-  for (const w of windows.value) {
-    if (x >= w.x && x <= w.x + w.width && y >= w.y && y <= w.y + w.height) {
-      return w
-    }
-  }
-  return null
-}
-
-function startResize(handle, event) {
-  state.value = 'resizing'
-  resizeHandleType = handle
-  const p = toScenePoint(event)
-  startPoint.x = p.x
-  startPoint.y = p.y
-  Object.assign(startRect, rect)
-}
-
-function handleResize(e) {
-  const p = toScenePoint(e)
-  const dx = p.x - startPoint.x
-  const dy = p.y - startPoint.y
-  let {x, y, width, height} = startRect
-
-  if (resizeHandleType.includes('l')) {
-    x += dx;
-    width -= dx;
-  }
-  if (resizeHandleType.includes('r')) {
-    width += dx;
-  }
-  if (resizeHandleType.includes('t')) {
-    y += dy;
-    height -= dy;
-  }
-  if (resizeHandleType.includes('b')) {
-    height += dy;
-  }
-
-
-  if (width < 0) {
-    x += width;
-    width = -width;
-    resizeHandleType = resizeHandleType.replace('l', 'L').replace('r', 'l').replace('L', 'r');
-    startPoint.x = p.x;
-    startRect.x = x;
-    startRect.width = width;
-  }
-  if (height < 0) {
-    y += height;
-    height = -height;
-    resizeHandleType = resizeHandleType.replace('t', 'T').replace('b', 't').replace('T', 'b');
-    startPoint.y = p.y;
-    startRect.y = y;
-    startRect.height = height;
-  }
-
-  rect.x = x;
-  rect.y = y;
-  rect.width = width;
-  rect.height = height;
 }
 
 function setTool(toolId) {
@@ -2795,135 +2124,6 @@ function handleCanvasMouseUp(event) {
   saveToHistory()
 }
 
-function startCreateTextItem(x, y) {
-  const bounds = getTextCreationBounds()
-  const safeX = Math.max(bounds.minX, Math.min(x, bounds.maxX))
-  const safeY = Math.max(bounds.minY, Math.min(y, bounds.maxY))
-  const item = {
-    id: textItemIdSeed++,
-    x: safeX,
-    y: safeY,
-    text: '',
-    color: currentColor.value,
-    fontSize: lineWidth.value * 8,
-    fontFamily: textStyle.fontFamily,
-    bold: textStyle.bold,
-    stroke: textStyle.stroke,
-    strokeColor: textStyle.strokeColor,
-    shadow: textStyle.shadow
-  }
-  textItems.value.push(item)
-  startEditTextItem(item)
-}
-
-function startEditTextItem(item) {
-  currentTool.value = 'text'
-  editingTextId.value = item.id
-  selectedTextId.value = item.id
-  editingBeforeText.value = item.text
-  editingBeforeItem.value = {...item}
-  currentColor.value = item.color
-  lineWidth.value = Math.max(1, Math.round(item.fontSize / 8))
-  textStyle.fontFamily = item.fontFamily || 'Arial'
-  textStyle.bold = !!item.bold
-  textStyle.stroke = !!item.stroke
-  textStyle.strokeColor = item.strokeColor || '#000000'
-  textStyle.shadow = !!item.shadow
-  nextTick(() => {
-    const el = editingElementRef.value
-    if (el) {
-      el.focus()
-      const selection = window.getSelection()
-      const range = document.createRange()
-      range.selectNodeContents(el)
-      range.collapse(false)
-      selection.removeAllRanges()
-      selection.addRange(range)
-    }
-  })
-}
-
-function setEditingElementRef(el) {
-  if (!el || editingTextId.value === null) return
-  editingElementRef.value = el
-  const item = textItems.value.find(t => t.id === editingTextId.value)
-  if (!item) return
-  if (el.innerText !== item.text) {
-    el.innerText = item.text
-  }
-}
-
-function onInlineTextInput(item, event) {
-  item.text = event.target.innerText.replace(/\r/g, '')
-  selectedTextId.value = item.id
-}
-
-function handleInlineEditorKeydown(event) {
-  if (event.key === 'Escape') {
-    event.preventDefault()
-    cancelInlineEdit()
-  }
-}
-
-function finishInlineEdit() {
-  if (editingTextId.value === null) return
-  const id = editingTextId.value
-  const index = textItems.value.findIndex(item => item.id === id)
-  const before = editingBeforeItem.value ? {...editingBeforeItem.value} : null
-  if (index === -1) {
-    editingTextId.value = null
-    editingElementRef.value = null
-    editingBeforeText.value = ''
-    editingBeforeItem.value = null
-    return
-  }
-  const text = textItems.value[index].text.trim()
-  let shouldSave = false
-  if (!text) {
-    textItems.value.splice(index, 1)
-    selectedTextId.value = null
-    if (before && String(before.text || '').trim()) {
-      appendVectorDeleteCommand('text', id)
-      shouldSave = true
-    }
-  } else {
-    textItems.value[index].text = text
-    selectedTextId.value = id
-    const after = {...textItems.value[index]}
-    if (!areFlatItemsEqual(before, after)) {
-      appendVectorUpsertCommand('text', after)
-      shouldSave = true
-    }
-  }
-  editingTextId.value = null
-  editingElementRef.value = null
-  editingBeforeText.value = ''
-  editingBeforeItem.value = null
-  if (shouldSave) {
-    saveToHistory()
-  }
-}
-
-function cancelInlineEdit() {
-  if (editingTextId.value === null) return
-  const id = editingTextId.value
-  const index = textItems.value.findIndex(item => item.id === id)
-  const before = editingBeforeItem.value ? {...editingBeforeItem.value} : null
-  if (index !== -1) {
-    if (!String(before?.text || '').trim()) {
-      textItems.value.splice(index, 1)
-      selectedTextId.value = null
-    } else {
-      textItems.value[index] = {...before}
-      selectedTextId.value = id
-    }
-  }
-  editingTextId.value = null
-  editingElementRef.value = null
-  editingBeforeText.value = ''
-  editingBeforeItem.value = null
-}
-
 function startDragTextItem(id, event) {
   if (editingTextId.value !== null) return
   selectedTextId.value = id
@@ -2958,19 +2158,6 @@ function startDragShapeItem(id, event) {
   state.value = 'shape-moving'
 }
 
-function syncFillControlsFromShape(item) {
-  if (!item || !FILLABLE_SHAPE_TOOLS.includes(item.type)) return
-  if (item.type === 'number') {
-    shapeFillEnabled.value = true
-    shapeFillOpacity.value = 1
-    return
-  }
-  shapeFillEnabled.value = !!item.filled
-  shapeFillOpacity.value = item.filled
-      ? (Number(item.fillOpacity) || 0.35)
-      : (Number(shapeFillOpacity.value) || 0.35)
-}
-
 function startResizeShapeItem(id, handle, event) {
   if (editingTextId.value !== null) return
   const item = shapeItems.value.find((entry) => entry.id === id)
@@ -2991,50 +2178,6 @@ function startResizeShapeItem(id, handle, event) {
   state.value = 'shape-resizing'
 }
 
-function handleResizeShapeItem(event) {
-  const item = shapeItems.value.find((entry) => entry.id === resizingShapeStart.id)
-  if (!item) return
-  const p = toScenePoint(event)
-  const dx = p.x - resizingShapeStart.x
-  const dy = p.y - resizingShapeStart.y
-  let x = resizingShapeStart.itemX
-  let y = resizingShapeStart.itemY
-  let width = resizingShapeStart.itemWidth
-  let height = resizingShapeStart.itemHeight
-  const handle = resizingShapeStart.handle
-  if (handle.includes('l')) {
-    x += dx
-    width -= dx
-  }
-  if (handle.includes('r')) {
-    width += dx
-  }
-  if (handle.includes('t')) {
-    y += dy
-    height -= dy
-  }
-  if (handle.includes('b')) {
-    height += dy
-  }
-  const minSize = 4
-  if (width < minSize) {
-    if (handle.includes('l')) {
-      x = resizingShapeStart.itemX + resizingShapeStart.itemWidth - minSize
-    }
-    width = minSize
-  }
-  if (height < minSize) {
-    if (handle.includes('t')) {
-      y = resizingShapeStart.itemY + resizingShapeStart.itemHeight - minSize
-    }
-    height = minSize
-  }
-  item.x = x
-  item.y = y
-  item.width = width
-  item.height = height
-}
-
 function startAdjustLineEndpoint(id, point, event) {
   if (editingTextId.value !== null) return
   const item = shapeItems.value.find((entry) => entry.id === id)
@@ -3045,254 +2188,6 @@ function startAdjustLineEndpoint(id, point, event) {
   adjustingLinePointStart.point = point
   adjustingLineBeforeItem = {...item}
   state.value = 'shape-point-moving'
-}
-
-function handleAdjustLineEndpoint(event) {
-  const item = shapeItems.value.find((entry) => entry.id === adjustingLinePointStart.id)
-  if (!item || (item.type !== 'line' && item.type !== 'arrow')) return
-  const p = toScenePoint(event)
-  const startAbs = {
-    x: item.x + item.x1,
-    y: item.y + item.y1
-  }
-  const endAbs = {
-    x: item.x + item.x2,
-    y: item.y + item.y2
-  }
-  if (adjustingLinePointStart.point === 'start') {
-    startAbs.x = p.x
-    startAbs.y = p.y
-  } else {
-    endAbs.x = p.x
-    endAbs.y = p.y
-  }
-  updateLineLikeShapeFromAbsolutePoints(item, startAbs, endAbs)
-}
-
-function updateLineLikeShapeFromAbsolutePoints(item, startAbs, endAbs) {
-  const minX = Math.min(startAbs.x, endAbs.x)
-  const minY = Math.min(startAbs.y, endAbs.y)
-  item.x = minX
-  item.y = minY
-  item.width = Math.max(1, Math.abs(endAbs.x - startAbs.x))
-  item.height = Math.max(1, Math.abs(endAbs.y - startAbs.y))
-  item.x1 = startAbs.x - minX
-  item.y1 = startAbs.y - minY
-  item.x2 = endAbs.x - minX
-  item.y2 = endAbs.y - minY
-  if (item.type === 'arrow') {
-    const arrowHead = getArrowHeadPoints(item.x1, item.y1, item.x2, item.y2)
-    item.arrowLeft = arrowHead.left
-    item.arrowRight = arrowHead.right
-  }
-}
-
-function createShapeItem(type, fromX, fromY, toX, toY) {
-  const dx = toX - fromX
-  const dy = toY - fromY
-  const stroke = Math.max(1, Number(lineWidth.value) || 1)
-  if (type === 'number') {
-    const dist = Math.sqrt(dx * dx + dy * dy)
-    const radius = dist < 4 ? NUMBER_DEFAULT_RADIUS : Math.max(NUMBER_MIN_RADIUS, dist)
-    const n = nextNumberCalloutIndex()
-    const item = ensureShapeFillFields({
-      id: shapeItemIdSeed++,
-      type,
-      n,
-      x: fromX - radius,
-      y: fromY - radius,
-      width: radius * 2,
-      height: radius * 2,
-      color: currentColor.value,
-      lineWidth: Math.max(2, stroke),
-      filled: true,
-      fillOpacity: 1
-    })
-    shapeItems.value.push(item)
-    return item
-  }
-  if (Math.abs(dx) < 2 && Math.abs(dy) < 2) return
-  if (type === 'rect' || type === 'redact') {
-    const item = ensureShapeFillFields({
-      id: shapeItemIdSeed++,
-      type,
-      x: Math.min(fromX, toX),
-      y: Math.min(fromY, toY),
-      width: Math.max(2, Math.abs(dx)),
-      height: Math.max(2, Math.abs(dy)),
-      color: type === 'redact' ? '#000000' : currentColor.value,
-      lineWidth: type === 'redact' ? 0 : stroke,
-      filled: type === 'redact' ? true : shapeFillEnabled.value,
-      fillOpacity: type === 'redact' ? 1 : (shapeFillEnabled.value ? (Number(shapeFillOpacity.value) || 0.35) : 0)
-    })
-    shapeItems.value.push(item)
-    return item
-  }
-  if (type === 'circle') {
-    const radius = Math.sqrt(dx * dx + dy * dy)
-    const item = ensureShapeFillFields({
-      id: shapeItemIdSeed++,
-      type,
-      x: fromX - radius,
-      y: fromY - radius,
-      width: Math.max(2, radius * 2),
-      height: Math.max(2, radius * 2),
-      color: currentColor.value,
-      lineWidth: stroke,
-      filled: shapeFillEnabled.value,
-      fillOpacity: shapeFillEnabled.value ? (Number(shapeFillOpacity.value) || 0.35) : 0
-    })
-    shapeItems.value.push(item)
-    return item
-  }
-  const minX = Math.min(fromX, toX)
-  const minY = Math.min(fromY, toY)
-  const width = Math.max(2, Math.abs(dx))
-  const height = Math.max(2, Math.abs(dy))
-  const x1 = fromX - minX
-  const y1 = fromY - minY
-  const x2 = toX - minX
-  const y2 = toY - minY
-  const arrowHead = getArrowHeadPoints(x1, y1, x2, y2)
-  const item = {
-    id: shapeItemIdSeed++,
-    type,
-    x: minX,
-    y: minY,
-    width,
-    height,
-    x1,
-    y1,
-    x2,
-    y2,
-    color: currentColor.value,
-    lineWidth: stroke,
-    arrowLeft: arrowHead.left,
-    arrowRight: arrowHead.right
-  }
-  shapeItems.value.push(item)
-  return item
-}
-
-function getArrowHeadPoints(fromX, fromY, toX, toY) {
-  const angle = Math.atan2(toY - fromY, toX - fromX)
-  const headLength = 12
-  return {
-    left: {
-      x: toX - headLength * Math.cos(angle - Math.PI / 6),
-      y: toY - headLength * Math.sin(angle - Math.PI / 6)
-    },
-    right: {
-      x: toX - headLength * Math.cos(angle + Math.PI / 6),
-      y: toY - headLength * Math.sin(angle + Math.PI / 6)
-    }
-  }
-}
-
-function getShapeItemStyle(shape) {
-  const scale = longshotResultActive.value ? longshotViewScale.value : 1
-  const ox = longshotResultActive.value ? longshotViewOffset.x : 0
-  const oy = longshotResultActive.value ? longshotViewOffset.y : 0
-  return {
-    left: `${shape.x * scale + ox}px`,
-    top: `${shape.y * scale + oy}px`,
-    width: `${shape.width * scale}px`,
-    height: `${shape.height * scale}px`
-  }
-}
-
-function getShapeStrokeStyle(shape) {
-  const scale = longshotResultActive.value ? longshotViewScale.value : 1
-  return {
-    borderColor: shape.color,
-    borderWidth: `${Math.max(1, shape.lineWidth * scale)}px`
-  }
-}
-
-function getShapeFillStyle(shape) {
-  if (!shape?.filled && shape?.type !== 'redact') return {display: 'none'}
-  return {
-    backgroundColor: shape.type === 'redact'
-        ? '#000000'
-        : hexToRgba(shape.color, shape.fillOpacity ?? 0.35)
-  }
-}
-
-function getShapeNumberStyle(shape) {
-  const scale = longshotResultActive.value ? longshotViewScale.value : 1
-  const w = Math.max(2, shape.width * scale)
-  const h = Math.max(2, shape.height * scale)
-  return {
-    width: `${w}px`,
-    height: `${h}px`,
-    backgroundColor: shape.color,
-    borderColor: shape.color,
-    borderWidth: `${Math.max(1, (shape.lineWidth || 2) * scale)}px`,
-    fontSize: `${Math.max(10, Math.min(w, h) * 0.45)}px`,
-    lineHeight: `${h}px`
-  }
-}
-
-function getShapeLineViewBox(shape) {
-  const width = Math.max(1, Number(shape?.width) || 1)
-  const height = Math.max(1, Number(shape?.height) || 1)
-  return `0 0 ${width} ${height}`
-}
-
-function getShapePointHandleStyle(x, y) {
-  const scale = longshotResultActive.value ? longshotViewScale.value : 1
-  return {
-    left: `${x * scale}px`,
-    top: `${y * scale}px`
-  }
-}
-
-function toggleTextBold() {
-  textStyle.bold = !textStyle.bold
-  syncEditingTextStyle()
-}
-
-function toggleTextStroke() {
-  textStyle.stroke = !textStyle.stroke
-  syncEditingTextStyle()
-}
-
-function toggleTextShadow() {
-  textStyle.shadow = !textStyle.shadow
-  syncEditingTextStyle()
-}
-
-function syncEditingTextStyle() {
-  if (editingTextId.value === null) return
-  const item = textItems.value.find(t => t.id === editingTextId.value)
-  if (!item) return
-  item.color = currentColor.value
-  item.fontSize = lineWidth.value * 8
-  item.fontFamily = textStyle.fontFamily
-  item.bold = textStyle.bold
-  item.stroke = textStyle.stroke
-  item.strokeColor = textStyle.strokeColor
-  item.shadow = textStyle.shadow
-}
-
-function getTextItemStyle(item) {
-  const fontWeight = item.bold ? '700' : '400'
-  const textShadow = item.shadow ? '0 2px 8px rgba(0,0,0,0.6)' : 'none'
-  const scale = longshotResultActive.value ? longshotViewScale.value : 1
-  const ox = longshotResultActive.value ? longshotViewOffset.x : 0
-  const oy = longshotResultActive.value ? longshotViewOffset.y : 0
-  const displayFontSize = Math.max(8, item.fontSize * scale)
-  const strokeWidth = Math.max(1, Math.round(displayFontSize / 14))
-  return {
-    left: `${item.x * scale + ox}px`,
-    top: `${item.y * scale + oy}px`,
-    color: item.color,
-    fontSize: `${displayFontSize}px`,
-    fontFamily: item.fontFamily || 'Arial',
-    fontWeight,
-    textShadow,
-    WebkitTextStroke: item.stroke ? `${strokeWidth}px ${item.strokeColor || '#000000'}` : '0'
-  }
 }
 
 function getTextCreationBounds() {
@@ -3328,36 +2223,6 @@ function getTextCreationBounds() {
   const maxX = Math.max(minX, window.innerWidth - estimatedDisplayWidth - displayMargin)
   const maxY = Math.max(minY, window.innerHeight - estimatedDisplayHeight - displayMargin)
   return {minX, minY, maxX, maxY}
-}
-
-function drawArrowHead(ctx, fromX, fromY, toX, toY) {
-  const angle = Math.atan2(toY - fromY, toX - fromX)
-  const headLength = 15
-  ctx.beginPath()
-  ctx.moveTo(toX, toY)
-  ctx.lineTo(toX - headLength * Math.cos(angle - Math.PI / 6), toY - headLength * Math.sin(angle - Math.PI / 6))
-  ctx.moveTo(toX, toY)
-  ctx.lineTo(toX - headLength * Math.cos(angle + Math.PI / 6), toY - headLength * Math.sin(angle + Math.PI / 6))
-  ctx.stroke()
-}
-
-function pickColorAt(event) {
-  const p = toScenePoint(event)
-  pickColorAtScene(p.x, p.y)
-}
-
-function pickColorAtScene(sceneX, sceneY) {
-  const px = Math.round(sceneX * dpr)
-  const py = Math.round(sceneY * dpr)
-  const color = getMergedPixelColorAt(px, py)
-  if (!color) return
-  const hex = '#' + [color.r, color.g, color.b].map(v => v.toString(16).padStart(2, '0')).join('')
-  pickColor.value = hex.toUpperCase()
-  pickColorRgb.value = `RGB(${color.r}, ${color.g}, ${color.b})`
-  if (isDrawing.value) {
-    currentColor.value = pickColor.value
-  }
-  renderPickerMagnifier(px, py)
 }
 
 function getMergedPixelColorAt(px, py) {
@@ -3444,43 +2309,6 @@ function renderPickerMagnifier(px, py) {
   magnifierCtx.strokeStyle = '#00aaff'
   magnifierCtx.lineWidth = 2
   magnifierCtx.strokeRect(half * zoom + 1, half * zoom + 1, zoom - 2, zoom - 2)
-}
-
-async function copyPickedColor() {
-  if (!pickColor.value) return
-  const value = pickerDisplayValue.value || pickColor.value
-  try {
-    await invoke(IPC_COMMANDS.COPY_TEXT, {text: value})
-    pickerCopyHint.value = `已复制：${value}`
-    window.setTimeout(() => {
-      if (currentTool.value === 'picker') {
-        pickerCopyHint.value = t('screenshot.pickerHint')
-      }
-    }, 1000)
-  } catch (error) {
-    pickerCopyHint.value = '复制失败，请重试'
-  }
-}
-
-function cloneTextItem(item) {
-  return item ? {...item} : null
-}
-
-function cloneShapeItem(item) {
-  if (!item) return null
-  return {...item}
-}
-
-function areFlatItemsEqual(a, b) {
-  if (a === b) return true
-  if (!a || !b) return false
-  const keys = new Set([...Object.keys(a), ...Object.keys(b)])
-  for (const key of keys) {
-    if (a[key] !== b[key]) {
-      return false
-    }
-  }
-  return true
 }
 
 function appendVectorUpsertCommand(target, item) {
@@ -3846,7 +2674,6 @@ function getCroppedCanvas() {
     throw new Error('裁剪画布上下文创建失败')
   }
 
-
   const baseSource = (isPixelCtxReadable() && screenshotPixelCanvas)
       ? screenshotPixelCanvas
       : screenshotImg.value
@@ -3856,7 +2683,6 @@ function getCroppedCanvas() {
       0, 0, sourceWidth, sourceHeight
   )
 
-
   const drawCtx = canvas.value.getContext('2d')
   if (!drawCtx) {
     throw new Error('绘制画布上下文获取失败')
@@ -3865,7 +2691,6 @@ function getCroppedCanvas() {
   drawCtx.resetTransform()
   const overlayData = drawCtx.getImageData(sourceX, sourceY, sourceWidth, sourceHeight)
   drawCtx.setTransform(oldTransform)
-
 
   const tempCanvas = document.createElement('canvas')
   tempCanvas.width = sourceWidth
@@ -3881,449 +2706,6 @@ function getCroppedCanvas() {
   drawTextItemsOnCroppedCanvas(ctx, sourceX, sourceY, sourceWidth, sourceHeight)
 
   return cropCanvas
-}
-
-function getLongshotFullCanvas() {
-  const imageW = Math.max(1, Number(screenshotImg.value?.width) || 1)
-  const imageH = Math.max(1, Number(screenshotImg.value?.height) || 1)
-  const fullCanvas = document.createElement('canvas')
-  fullCanvas.width = imageW
-  fullCanvas.height = imageH
-  const ctx = fullCanvas.getContext('2d')
-  if (!ctx) {
-    throw new Error('长截图导出画布上下文创建失败')
-  }
-  ctx.drawImage(screenshotImg.value, 0, 0, imageW, imageH)
-
-
-  const view = getLongshotImageViewportRect(imageW, imageH)
-  if (canvas.value) {
-    ctx.drawImage(
-        canvas.value,
-        view.x,
-        view.y,
-        view.width,
-        view.height,
-        0,
-        0,
-        imageW,
-        imageH
-    )
-  }
-  drawShapeItemsOnLongshotCanvas(ctx, view)
-  drawTextItemsOnLongshotCanvas(ctx, view)
-  return fullCanvas
-}
-
-function getLongshotImageViewportRect(imageW, imageH) {
-  const vw = Math.max(1, Number(window.innerWidth) || 1)
-  const vh = Math.max(1, Number(window.innerHeight) || 1)
-  const fit = Math.min(vw / imageW, vh / imageH)
-  const width = imageW * fit
-  const height = imageH * fit
-  const x = (vw - width) / 2
-  const y = (vh - height) / 2
-  return {x, y, width, height, fit}
-}
-
-function sceneToImagePoint(x, y, view) {
-  return {
-    x: (x - view.x) / view.fit,
-    y: (y - view.y) / view.fit
-  }
-}
-
-function drawShapeItemsOnLongshotCanvas(ctx, view) {
-  ctx.save()
-  ctx.lineCap = 'round'
-  for (const item of shapeItems.value) {
-    ctx.strokeStyle = item.color
-    ctx.lineWidth = Math.max(1, item.lineWidth / Math.max(0.0001, view.fit))
-    const p = sceneToImagePoint(item.x, item.y, view)
-    const x = p.x
-    const y = p.y
-    const w = item.width / view.fit
-    const h = item.height / view.fit
-    if (item.type === 'rect') {
-      if (item.filled) {
-        ctx.fillStyle = hexToRgba(item.color, item.fillOpacity ?? 0.35)
-        ctx.fillRect(x, y, w, h)
-      }
-      ctx.strokeRect(x, y, w, h)
-      continue
-    }
-    if (item.type === 'redact') {
-      ctx.fillStyle = '#000000'
-      ctx.fillRect(x, y, w, h)
-      continue
-    }
-    if (item.type === 'circle' || item.type === 'number') {
-      const cx = x + w / 2
-      const cy = y + h / 2
-      const rx = Math.abs(w / 2)
-      const ry = Math.abs(h / 2)
-      if (item.type === 'number' || item.filled) {
-        ctx.fillStyle = item.type === 'number'
-            ? item.color
-            : hexToRgba(item.color, item.fillOpacity ?? 0.35)
-        ctx.beginPath()
-        ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2)
-        ctx.fill()
-      }
-      if (item.type === 'number') {
-        ctx.strokeStyle = item.color
-        ctx.lineWidth = Math.max(1, (item.lineWidth || 2) / Math.max(0.0001, view.fit))
-        ctx.beginPath()
-        ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2)
-        ctx.stroke()
-        ctx.fillStyle = '#ffffff'
-        const fontSize = Math.max(8, Math.min(w, h) * 0.48)
-        ctx.font = `700 ${fontSize}px Arial`
-        ctx.textAlign = 'center'
-        ctx.textBaseline = 'middle'
-        ctx.fillText(String(item.n || ''), cx, cy)
-        continue
-      }
-      ctx.beginPath()
-      ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2)
-      ctx.stroke()
-      continue
-    }
-    ctx.beginPath()
-    const s1 = sceneToImagePoint(item.x + item.x1, item.y + item.y1, view)
-    const s2 = sceneToImagePoint(item.x + item.x2, item.y + item.y2, view)
-    ctx.moveTo(s1.x, s1.y)
-    ctx.lineTo(s2.x, s2.y)
-    ctx.stroke()
-    if (item.type === 'arrow') {
-      ctx.beginPath()
-      const head = sceneToImagePoint(item.x + item.x2, item.y + item.y2, view)
-      const left = sceneToImagePoint(item.x + item.arrowLeft.x, item.y + item.arrowLeft.y, view)
-      const right = sceneToImagePoint(item.x + item.arrowRight.x, item.y + item.arrowRight.y, view)
-      ctx.moveTo(head.x, head.y)
-      ctx.lineTo(left.x, left.y)
-      ctx.moveTo(head.x, head.y)
-      ctx.lineTo(right.x, right.y)
-      ctx.stroke()
-    }
-  }
-  ctx.restore()
-}
-
-function drawTextItemsOnLongshotCanvas(ctx, view) {
-  for (const item of textItems.value) {
-    const lines = String(item.text || '').split('\n')
-    const p = sceneToImagePoint(item.x, item.y, view)
-    const x = p.x
-    const y = p.y
-    const fontSize = Math.max(8, item.fontSize / Math.max(0.0001, view.fit))
-    const lineHeight = Math.max(fontSize * 1.25, fontSize + 4)
-    const fontWeight = item.bold ? '700' : '400'
-    ctx.save()
-    ctx.fillStyle = item.color
-    ctx.font = `${fontWeight} ${fontSize}px ${item.fontFamily || 'Arial'}`
-    ctx.textBaseline = 'top'
-    if (item.shadow) {
-      ctx.shadowColor = 'rgba(0, 0, 0, 0.65)'
-      ctx.shadowBlur = Math.max(4, Math.round(fontSize * 0.35))
-      ctx.shadowOffsetX = 0
-      ctx.shadowOffsetY = Math.max(1, Math.round(fontSize * 0.1))
-    } else {
-      ctx.shadowColor = 'transparent'
-      ctx.shadowBlur = 0
-      ctx.shadowOffsetX = 0
-      ctx.shadowOffsetY = 0
-    }
-    for (let i = 0; i < lines.length; i++) {
-      const lineY = y + i * lineHeight
-      if (item.stroke) {
-        ctx.strokeStyle = item.strokeColor || '#000000'
-        ctx.lineWidth = Math.max(1, Math.round(fontSize / 14))
-        ctx.strokeText(lines[i], x, lineY)
-      }
-      ctx.fillText(lines[i], x, lineY)
-    }
-    ctx.restore()
-  }
-}
-
-function drawTextItemsOnCroppedCanvas(ctx, sourceX, sourceY, sourceWidth, sourceHeight) {
-  const cropLeft = sourceX / dpr
-  const cropTop = sourceY / dpr
-  const cropRight = cropLeft + sourceWidth / dpr
-  const cropBottom = cropTop + sourceHeight / dpr
-  for (const item of textItems.value) {
-    if (item.x > cropRight || item.y > cropBottom) continue
-    if (item.x < cropLeft - 400 || item.y < cropTop - 200) continue
-    drawTextItemToContext(ctx, item, item.x - cropLeft, item.y - cropTop)
-  }
-}
-
-function drawTextItemToContext(ctx, item, x, y) {
-  const lines = item.text.split('\n')
-  const fontWeight = item.bold ? '700' : '400'
-  ctx.save()
-  ctx.scale(dpr, dpr)
-  ctx.fillStyle = item.color
-  ctx.font = `${fontWeight} ${item.fontSize}px ${item.fontFamily || 'Arial'}`
-  ctx.textBaseline = 'top'
-  if (item.shadow) {
-    ctx.shadowColor = 'rgba(0, 0, 0, 0.65)'
-    ctx.shadowBlur = Math.max(4, Math.round(item.fontSize * 0.35))
-    ctx.shadowOffsetX = 0
-    ctx.shadowOffsetY = Math.max(1, Math.round(item.fontSize * 0.1))
-  } else {
-    ctx.shadowColor = 'transparent'
-    ctx.shadowBlur = 0
-    ctx.shadowOffsetX = 0
-    ctx.shadowOffsetY = 0
-  }
-  const lineHeight = Math.max(item.fontSize * 1.25, item.fontSize + 4)
-  for (let i = 0; i < lines.length; i++) {
-    const lineY = y + i * lineHeight
-    if (item.stroke) {
-      ctx.strokeStyle = item.strokeColor || '#000000'
-      ctx.lineWidth = Math.max(1, Math.round(item.fontSize / 14))
-      ctx.strokeText(lines[i], x, lineY)
-    }
-    ctx.fillText(lines[i], x, lineY)
-  }
-  ctx.restore()
-}
-
-function drawShapeItemsOnCroppedCanvas(ctx, sourceX, sourceY, sourceWidth, sourceHeight) {
-  const cropLeft = sourceX / dpr
-  const cropTop = sourceY / dpr
-  const cropRight = cropLeft + sourceWidth / dpr
-  const cropBottom = cropTop + sourceHeight / dpr
-  for (const item of shapeItems.value) {
-    const itemRight = item.x + item.width
-    const itemBottom = item.y + item.height
-    if (itemRight < cropLeft || itemBottom < cropTop || item.x > cropRight || item.y > cropBottom) continue
-    drawShapeItemToContext(ctx, item, cropLeft, cropTop)
-  }
-}
-
-function drawShapeItemToContext(ctx, item, cropLeft, cropTop) {
-  const x = item.x - cropLeft
-  const y = item.y - cropTop
-  ctx.save()
-  ctx.scale(dpr, dpr)
-  ctx.strokeStyle = item.color
-  ctx.lineWidth = item.lineWidth
-  ctx.lineCap = 'round'
-  if (item.type === 'rect') {
-    if (item.filled) {
-      ctx.fillStyle = hexToRgba(item.color, item.fillOpacity ?? 0.35)
-      ctx.fillRect(x, y, item.width, item.height)
-    }
-    if (item.type !== 'redact') {
-      ctx.strokeRect(x, y, item.width, item.height)
-    }
-    ctx.restore()
-    return
-  }
-  if (item.type === 'redact') {
-    ctx.fillStyle = '#000000'
-    ctx.fillRect(x, y, item.width, item.height)
-    ctx.restore()
-    return
-  }
-  if (item.type === 'circle' || item.type === 'number') {
-    const cx = x + item.width / 2
-    const cy = y + item.height / 2
-    const rx = item.width / 2
-    const ry = item.height / 2
-    if (item.type === 'number' || item.filled) {
-      ctx.fillStyle = item.type === 'number'
-          ? item.color
-          : hexToRgba(item.color, item.fillOpacity ?? 0.35)
-      ctx.beginPath()
-      ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2)
-      ctx.fill()
-    }
-    if (item.type === 'number') {
-      ctx.strokeStyle = item.color
-      ctx.lineWidth = Math.max(2, item.lineWidth || 2)
-      ctx.beginPath()
-      ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2)
-      ctx.stroke()
-      ctx.fillStyle = '#ffffff'
-      const fontSize = Math.max(10, Math.min(item.width, item.height) * 0.48)
-      ctx.font = `700 ${fontSize}px Arial`
-      ctx.textAlign = 'center'
-      ctx.textBaseline = 'middle'
-      ctx.fillText(String(item.n || ''), cx, cy)
-      ctx.restore()
-      return
-    }
-    ctx.beginPath()
-    ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2)
-    ctx.stroke()
-    ctx.restore()
-    return
-  }
-  ctx.beginPath()
-  ctx.moveTo(x + item.x1, y + item.y1)
-  ctx.lineTo(x + item.x2, y + item.y2)
-  ctx.stroke()
-  if (item.type === 'arrow') {
-    ctx.beginPath()
-    ctx.moveTo(x + item.x2, y + item.y2)
-    ctx.lineTo(x + item.arrowLeft.x, y + item.arrowLeft.y)
-    ctx.moveTo(x + item.x2, y + item.y2)
-    ctx.lineTo(x + item.arrowRight.x, y + item.arrowRight.y)
-    ctx.stroke()
-  }
-  ctx.restore()
-}
-
-async function writeClipboardImage(linked, closeAfterCopy) {
-  try {
-    if (!(await ensureCaptureReady())) {
-      showCaptureError('截图源尚未就绪，请稍后重试')
-      return
-    }
-    await invoke(IPC_COMMANDS.SET_SCREENSHOT_CLIPBOARD_LINK_ONCE, {linked})
-    if (sourceImagePath.value) {
-      const result = await invoke(IPC_COMMANDS.COPY_SCREENSHOT_TO_CLIPBOARD, {
-        request: buildBackendExportRequest('')
-      })
-      if (!result?.success) {
-        throw new Error(result?.error || result?.message || '复制失败')
-      }
-    } else {
-      const pngBase64 = resolveExportBase64()
-      const blob = base64ToBlob(pngBase64, 'image/png')
-      await navigator.clipboard.write([new ClipboardItem({'image/png': blob})])
-    }
-    if (closeAfterCopy) {
-      close()
-    }
-  } catch (error) {
-    console.error('复制失败:', error)
-    showCaptureError('复制失败')
-  }
-}
-
-async function copyToClipboardLinked() {
-  await writeClipboardImage(true, true)
-}
-
-async function completeAndCopyUnlinked() {
-  await writeClipboardImage(false, true)
-}
-
-async function pinToScreenAndClose() {
-  try {
-    if (!(await ensureCaptureReady())) {
-      showCaptureError('截图源尚未就绪，请稍后重试')
-      return
-    }
-    let base64 = ''
-    let pinWidth = 0
-    let pinHeight = 0
-    const region = getGlobalSelectionRect()
-    if (sourceImagePath.value) {
-      const renderResult = await invoke(IPC_COMMANDS.RENDER_SCREENSHOT_TO_PNG_DATA, {
-        request: buildBackendExportRequest('')
-      })
-      if (!renderResult?.success) {
-        throw new Error(renderResult?.error || renderResult?.message || '生成固定图片失败')
-      }
-      base64 = String(renderResult?.pngBase64 || '')
-      pinWidth = Math.max(1, Number(renderResult?.width) || 1)
-      pinHeight = Math.max(1, Number(renderResult?.height) || 1)
-    } else {
-      base64 = resolveExportBase64()
-      pinWidth = region.width
-      pinHeight = region.height
-    }
-
-    const payload = {
-      request: {
-        pngBase64: base64,
-        x: region.x,
-        y: region.y,
-        width: pinWidth,
-        height: pinHeight
-      }
-    }
-    let result = null
-    try {
-      result = await invoke(IPC_COMMANDS.PIN_SCREENSHOT_ON_SCREEN, payload)
-    } catch (firstError) {
-      await new Promise(resolve => setTimeout(resolve, 80))
-      result = await invoke(IPC_COMMANDS.PIN_SCREENSHOT_ON_SCREEN, payload)
-      if (!result?.success) {
-        throw firstError
-      }
-    }
-    if (result?.success) {
-      close()
-    }
-  } catch (error) {
-    const reason = error?.message
-        || (typeof error === 'string' ? error : JSON.stringify(error))
-        || '未知错误'
-    console.error('固定图片失败:', error)
-    showCaptureError(`固定图片失败：${reason}`)
-  }
-}
-
-async function saveAndClose() {
-  try {
-    if (!(await ensureCaptureReady())) {
-      showCaptureError('截图源尚未就绪，请稍后重试')
-      return
-    }
-
-    const pathResult = await invoke(IPC_COMMANDS.CHOOSE_SCREENSHOT_SAVE_PATH)
-    if (!pathResult?.success) {
-      if (pathResult?.cancelled) {
-        return
-      }
-      showCaptureError(pathResult?.error || pathResult?.message || '选择保存路径失败')
-      return
-    }
-
-
-
-
-    const shouldSaveRenderedImageDirectly = !sourceImagePath.value
-
-    if (shouldSaveRenderedImageDirectly) {
-      const base64 = resolveExportBase64()
-      const result = await invoke(IPC_COMMANDS.SAVE_SCREENSHOT_TO_PATH, {
-        pngBase64: base64,
-        outputPath: pathResult.path
-      })
-      if (result?.success) {
-        close()
-        return
-      }
-      showCaptureError(result?.error || result?.message || '保存失败')
-      return
-    }
-
-    if (sourceImagePath.value) {
-      const exportResult = await invoke(IPC_COMMANDS.EXPORT_SCREENSHOT_TO_PATH, {
-        request: buildBackendExportRequest(pathResult.path)
-      })
-      if (exportResult?.success) {
-        close()
-        return
-      }
-      showCaptureError(exportResult?.error || exportResult?.message || '保存失败')
-      return
-    }
-  } catch (error) {
-    const reason = error?.message
-        || (typeof error === 'string' ? error : JSON.stringify(error))
-        || '未知错误'
-    console.error('保存失败:', error)
-    showCaptureError(`保存失败：${reason}`)
-  }
 }
 
 async function close() {
@@ -4388,683 +2770,4 @@ function handleKeyDown(event) {
 
 </script>
 
-<style scoped>
-:global(html),
-:global(body),
-:global(#app) {
-  margin: 0;
-  padding: 0;
-  width: 100%;
-  height: 100%;
-  overflow: hidden;
-}
-
-.fy-editor {
-  width: 100%;
-  height: 100%;
-  overflow: hidden;
-  user-select: none;
-  position: relative;
-  background: transparent;
-}
-
-.fy-editor.cursor-crosshair {
-  cursor: crosshair;
-}
-
-.fy-editor.cursor-default {
-  cursor: default;
-}
-
-.recording-region-confirm {
-  position: fixed;
-  display: flex;
-  gap: 6px;
-  z-index: 2100;
-}
-
-.region-icon-btn {
-  width: 32px;
-  height: 32px;
-  border: 1px solid var(--fy-border);
-  background: var(--fy-bg-hover);
-  color: var(--fy-text-primary);
-  border-radius: 8px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0;
-  cursor: pointer;
-  backdrop-filter: blur(2px);
-}
-
-.region-icon-btn:hover {
-  background: var(--fy-bg-surface);
-}
-
-.region-icon-btn.primary {
-  background: var(--fy-accent);
-  border-color: var(--fy-accent);
-  color: var(--fy-text-inverse);
-}
-
-.region-icon-btn.danger {
-  background: var(--fy-danger);
-  border-color: var(--fy-danger);
-  color: var(--fy-text-inverse);
-}
-
-.manual-longshot-hint {
-  position: fixed;
-  left: 16px;
-  bottom: 16px;
-  z-index: 2101;
-  background: var(--fy-bg-overlay);
-  border: 1px solid var(--fy-border);
-  color: var(--fy-text-primary);
-  font-size: 12px;
-  line-height: 1.4;
-  border-radius: 8px;
-  padding: 8px 10px;
-  backdrop-filter: var(--fy-backdrop-blur-light);
-  max-width: min(620px, calc(100vw - 32px));
-}
-
-.capture-ready-error-toast {
-  position: fixed;
-  left: 50%;
-  top: 24px;
-  transform: translateX(-50%);
-  z-index: 2200;
-  background: var(--fy-bg-danger, rgba(220, 40, 40, 0.9));
-  color: #fff;
-  font-size: 13px;
-  line-height: 1.4;
-  border-radius: 8px;
-  padding: 10px 20px;
-  backdrop-filter: blur(8px);
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.32);
-  white-space: nowrap;
-  pointer-events: auto;
-}
-
-.export-route-indicator {
-  position: fixed;
-  top: 16px;
-  right: 16px;
-  min-width: 168px;
-  max-width: 320px;
-  padding: 8px 10px;
-  border-radius: 8px;
-  color: #fff;
-  backdrop-filter: blur(8px);
-  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.28);
-  z-index: 2101;
-  user-select: text;
-}
-
-.export-route-indicator.backend {
-  background: rgba(32, 92, 58, 0.82);
-  border: 1px solid rgba(86, 196, 127, 0.68);
-}
-
-.export-route-indicator.fallback {
-  background: rgba(122, 77, 21, 0.84);
-  border: 1px solid rgba(255, 189, 89, 0.72);
-}
-
-.export-route-title {
-  font-size: 12px;
-  font-weight: 700;
-  line-height: 1.4;
-}
-
-.export-route-detail {
-  margin-top: 2px;
-  font-size: 11px;
-  line-height: 1.4;
-  opacity: 0.92;
-  word-break: break-all;
-}
-
-.bg-image {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 100vw;
-  height: 100vh;
-  z-index: 1;
-  object-fit: fill;
-}
-
-.bg-image.longshot-view-bg {
-  object-fit: contain;
-}
-
-.draw-canvas {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 100vw;
-  height: 100vh;
-  z-index: 2;
-  pointer-events: none; /* 画布不接管鼠标，由外层统一接管 */
-}
-
-.mask-layer {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 100vw;
-  height: 100vh;
-  z-index: 3;
-  background: transparent;
-}
-
-.mask-layer.pointer-none {
-  pointer-events: none; /* 绘制模式下，遮罩不阻挡鼠标事件 */
-}
-
-.mask-layer.longshot-overlay-only {
-  pointer-events: none;
-}
-
-.cutout {
-  position: absolute;
-  pointer-events: none;
-  /* 选区外暗化遮罩 (hole-punch) */
-  box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.35);
-}
-
-.cutout.longshot-running {
-  box-shadow: none;
-}
-
-.cutout.picker-active .cutout-border {
-  border-color: #2ecc71;
-}
-
-.cutout.picker-active .cutout-border.is-active {
-  border-color: #2ecc71;
-}
-
-.cutout.is-active {
-  cursor: move;
-}
-
-.cutout-border {
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  border: 2px solid rgba(255, 255, 255, 0.85);
-  pointer-events: auto;
-  cursor: crosshair;
-}
-
-.cutout-border.is-active {
-  border: 2px solid var(--fy-accent);
-  cursor: move;
-}
-
-.cutout.longshot-running .cutout-border {
-  border: 2px solid #4cb7ff;
-  pointer-events: none;
-}
-
-.cutout.picker-active .cutout-border {
-  border-color: #2ecc71;
-}
-
-.cutout.picker-active .cutout-border.is-active {
-  border-color: #2ecc71;
-}
-
-.size-info {
-  position: absolute;
-  top: -25px;
-  left: 0;
-  background: var(--fy-bg-overlay);
-  color: var(--fy-text-primary);
-  padding: 2px 6px;
-  border-radius: 4px;
-  font-size: 12px;
-  white-space: nowrap;
-}
-
-/* 控制点 */
-.handle {
-  position: absolute;
-  width: 10px;
-  height: 10px;
-  background: var(--fy-accent);
-  border: 1px solid var(--fy-text-inverse);
-  border-radius: 50%;
-  transform: translate(-50%, -50%);
-  z-index: 10;
-  pointer-events: auto;
-}
-
-.handle.tl {
-  top: 0;
-  left: 0;
-  cursor: nwse-resize;
-}
-
-.handle.tm {
-  top: 0;
-  left: 50%;
-  cursor: ns-resize;
-}
-
-.handle.tr {
-  top: 0;
-  left: 100%;
-  cursor: nesw-resize;
-}
-
-.handle.ml {
-  top: 50%;
-  left: 0;
-  cursor: ew-resize;
-}
-
-.handle.mr {
-  top: 50%;
-  left: 100%;
-  cursor: ew-resize;
-}
-
-.handle.bl {
-  top: 100%;
-  left: 0;
-  cursor: nesw-resize;
-}
-
-.handle.bm {
-  top: 100%;
-  left: 50%;
-  cursor: ns-resize;
-}
-
-.handle.br {
-  top: 100%;
-  left: 100%;
-  cursor: nwse-resize;
-}
-
-.window-highlight {
-  position: absolute;
-  z-index: 4;
-  pointer-events: none;
-}
-
-.window-border {
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  border: 2px solid var(--fy-accent);
-  background: var(--fy-accent-bg);
-}
-
-.window-label {
-  position: absolute;
-  top: -22px;
-  left: 0;
-  background: rgba(0, 170, 255, 0.9);
-  color: white;
-  padding: 2px 6px;
-  border-radius: 3px;
-  font-size: 12px;
-  max-width: 200px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-/* 工具栏 */
-.floating-toolbar {
-  position: absolute;
-  background: var(--fy-bg-surface);
-  border: 1px solid var(--fy-border);
-  border-radius: var(--fy-radius-xl);
-  padding: 5px;
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
-  z-index: 1000;
-  box-shadow: var(--fy-shadow-lg);
-  backdrop-filter: var(--fy-backdrop-blur-light);
-  max-width: calc(100vw - 20px);
-}
-
-.tools-row {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  flex-wrap: nowrap;
-}
-
-.tool-btn {
-  width: 32px;
-  height: 32px;
-  border: none;
-  background: transparent;
-  color: var(--fy-text-secondary);
-  border-radius: 6px;
-  cursor: pointer;
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  font-size: 14px;
-  transition: all var(--fy-duration-fast) ease;
-}
-
-.tool-btn:hover {
-  background: var(--fy-bg-hover);
-  color: var(--fy-text-primary);
-  transform: scale(1.05);
-}
-
-.tool-btn.active {
-  background: var(--fy-accent);
-  color: var(--fy-text-inverse);
-}
-
-.tool-btn:disabled {
-  opacity: 0.3;
-  cursor: not-allowed;
-  transform: none;
-}
-
-.tool-icon-wrap {
-  width: 16px;
-  height: 16px;
-  color: inherit;
-  display: block;
-}
-
-.tool-btn.primary {
-  color: var(--fy-accent);
-}
-
-.tool-btn.mini {
-  width: 26px;
-  height: 26px;
-  font-size: 12px;
-}
-
-.tool-btn.danger {
-  color: var(--fy-danger);
-}
-
-.tool-btn.danger:hover {
-  background: var(--fy-danger);
-  color: var(--fy-text-inverse);
-}
-
-.tool-btn.confirm {
-  color: var(--fy-success);
-}
-
-.tool-btn.confirm:hover {
-  background: var(--fy-success);
-  color: var(--fy-text-inverse);
-}
-
-.divider {
-  width: 1px;
-  height: 20px;
-  background: var(--fy-border);
-  margin: 0 4px;
-}
-
-.secondary-tools {
-  padding-top: 4px;
-  border-top: 1px solid var(--fy-border);
-  justify-content: space-between;
-  padding-left: 4px;
-  padding-right: 4px;
-}
-
-.color-picker {
-  width: 24px;
-  height: 24px;
-  border: none;
-  padding: 0;
-  border-radius: 4px;
-  cursor: pointer;
-  background: transparent;
-}
-
-.line-slider {
-  width: 100px;
-}
-
-.text-style-select {
-  height: 26px;
-  border: 1px solid var(--fy-border);
-  border-radius: 4px;
-  background: var(--fy-bg-input);
-  color: var(--fy-text-primary);
-  padding: 0 6px;
-}
-
-.mini-picker {
-  width: 20px;
-  height: 20px;
-}
-
-.color-picker-info {
-  position: absolute;
-  background: var(--fy-bg-overlay);
-  color: var(--fy-text-primary);
-  padding: 8px;
-  border-radius: 8px;
-  border: 1px solid var(--fy-border);
-  font-size: 12px;
-  z-index: 1000;
-  pointer-events: none;
-  display: flex;
-  gap: 8px;
-  align-items: center;
-}
-
-.picker-magnifier {
-  width: 132px;
-  height: 132px;
-  border-radius: 6px;
-  border: 1px solid rgba(255, 255, 255, 0.2);
-  image-rendering: pixelated;
-}
-
-.picker-meta {
-  min-width: 130px;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.picker-swatch {
-  width: 100%;
-  height: 22px;
-  border-radius: 4px;
-  border: 1px solid rgba(255, 255, 255, 0.25);
-}
-
-.picker-value {
-  font-size: 14px;
-  font-weight: 700;
-  letter-spacing: 0.2px;
-}
-
-.picker-hint {
-  font-size: 11px;
-  color: var(--fy-text-muted);
-}
-
-.shape-overlay-item {
-  position: absolute;
-  z-index: 1080;
-  cursor: move;
-  user-select: none;
-}
-
-.shape-overlay-item.selected {
-  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.45);
-}
-
-.shape-rect,
-.shape-circle {
-  width: 100%;
-  height: 100%;
-  border-style: solid;
-  box-sizing: border-box;
-}
-
-.shape-circle {
-  border-radius: 50%;
-}
-
-.shape-fill {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-}
-
-.shape-fill-circle {
-  border-radius: 50%;
-}
-
-.shape-number {
-  position: absolute;
-  left: 0;
-  top: 0;
-  border-style: solid;
-  border-radius: 50%;
-  box-sizing: border-box;
-  color: #fff;
-  font-weight: 700;
-  text-align: center;
-  font-family: Arial, 'Microsoft YaHei', sans-serif;
-  user-select: none;
-  pointer-events: none;
-}
-
-.shape-line-svg {
-  display: block;
-  width: 100%;
-  height: 100%;
-  overflow: visible;
-}
-
-.shape-resize-handle {
-  position: absolute;
-  width: 10px;
-  height: 10px;
-  background: var(--fy-accent);
-  border: 1px solid var(--fy-text-inverse);
-  border-radius: 50%;
-  transform: translate(-50%, -50%);
-  z-index: 5;
-}
-
-.shape-resize-handle.tl {
-  top: 0;
-  left: 0;
-  cursor: nwse-resize;
-}
-
-.shape-resize-handle.tm {
-  top: 0;
-  left: 50%;
-  cursor: ns-resize;
-}
-
-.shape-resize-handle.tr {
-  top: 0;
-  left: 100%;
-  cursor: nesw-resize;
-}
-
-.shape-resize-handle.ml {
-  top: 50%;
-  left: 0;
-  cursor: ew-resize;
-}
-
-.shape-resize-handle.mr {
-  top: 50%;
-  left: 100%;
-  cursor: ew-resize;
-}
-
-.shape-resize-handle.bl {
-  top: 100%;
-  left: 0;
-  cursor: nesw-resize;
-}
-
-.shape-resize-handle.bm {
-  top: 100%;
-  left: 50%;
-  cursor: ns-resize;
-}
-
-.shape-resize-handle.br {
-  top: 100%;
-  left: 100%;
-  cursor: nwse-resize;
-}
-
-.shape-point-handle {
-  position: absolute;
-  width: 12px;
-  height: 12px;
-  background: var(--fy-accent);
-  border: 1px solid var(--fy-text-inverse);
-  border-radius: 50%;
-  transform: translate(-50%, -50%);
-  z-index: 6;
-  cursor: move;
-}
-
-.text-overlay-item {
-  position: absolute;
-  z-index: 1100;
-  white-space: pre-wrap;
-  line-height: 1.25;
-  cursor: text;
-  user-select: none;
-}
-
-.text-overlay-item.selected {
-  border: 1px dashed rgba(255, 255, 255, 0.45);
-  border-radius: 3px;
-}
-
-.text-overlay-item.editing {
-  min-width: 24px;
-  min-height: 20px;
-  border: 1px dashed rgba(255, 255, 255, 0.78);
-  border-radius: 4px;
-  user-select: text;
-}
-
-.text-inline-editor {
-  min-width: 24px;
-  min-height: 20px;
-  outline: none;
-  white-space: pre-wrap;
-  caret-color: #ffffff;
-  user-select: text;
-  padding: 2px 4px;
-  border: 1px solid rgba(0, 0, 0, 0.88);
-  border-radius: 4px;
-  background: rgba(0, 0, 0, 0.18);
-  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.92), 0 2px 8px rgba(0, 0, 0, 0.28);
-}
-</style>
+<style src="./screenshot.scoped.css" scoped></style>

@@ -109,7 +109,7 @@ pub fn emit_image_history_payload(app_handle: &AppHandle, state: Arc<Mutex<AppSt
     if !should_emit {
         return;
     }
-    let manager = manager_arc.lock().unwrap();
+    let manager = lock_arc_mutex(&manager_arc);
     let payload = serde_json::json!({
         "history": manager.get_history_preview(),
         "categories": manager.get_categories(),

@@ -1,6 +1,7 @@
 pub mod audio_device;
 pub mod error_codes;
 pub mod events;
+pub mod ffmpeg_ops;
 pub mod ffmpeg_runner;
 pub mod job_object;
 pub mod native_wasapi;

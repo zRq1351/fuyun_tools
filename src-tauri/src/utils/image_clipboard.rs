@@ -244,7 +244,7 @@ impl PreviewGenerator {
                     build_preview_from_rgba(&task.rgba, task.width, task.height);
                 let item_id = task.item_id.clone();
 
-                let mut cache = cache_clone.lock().unwrap();
+                let mut cache = lock_arc_mutex(&cache_clone);
                 cache.put(
                     item_id.clone(),
                     (preview_width, preview_height, preview_base64.clone()),
@@ -2767,6 +2767,14 @@ fn normalize_pinned_items(pinned_items: &mut Vec<String>, history: &[ImageHistor
     pinned_items.retain(|id| existing.contains(id) && seen.insert(id.clone()));
 }
 
+/// 置顶排序：置顶项按 `pinned_items` 顺序置前，未置顶项保持原相对顺序（空入参提前返回）。
+///
+/// 与文本侧 `clipboard::apply_pin_order` 是**有意分叉**的平行实现，合并前须先对齐语义：
+/// - 本侧以 `item.id` 字段为键；文本侧以内容哈希（`stable_history_item_id`）为键
+/// - 文本侧清理孤立置顶条目（B1）；本侧无此逻辑
+/// - 本侧对空入参提前返回；文本侧无
+///
+/// 双侧行为已由各自测试模块的表征测试锁定。
 fn apply_pin_order(history: &mut Vec<ImageHistoryItem>, pinned_items: &[String]) {
     if pinned_items.is_empty() || history.is_empty() {
         return;
@@ -3185,5 +3193,36 @@ mod tests {
         assert!(after > before);
         // 保证接收端存在，避免通道断开干扰
         let _ = rx.try_recv();
+    }
+    fn img_item(id: &str) -> ImageHistoryItem {
+        ImageHistoryItem {
+            id: id.to_string(),
+            width: 0,
+            height: 0,
+            image_path: String::new(),
+            rgba_bytes: Vec::new(),
+            signature: String::new(),
+            lazy_load: false,
+            cached_signature: None,
+        }
+    }
+
+    #[test]
+    fn test_apply_pin_order_by_item_id() {
+        // 表征测试：锁定图片侧置顶排序语义（与文本侧有意分叉，见 apply_pin_order 文档）
+        let mut history = vec![img_item("a"), img_item("b"), img_item("c")];
+        apply_pin_order(&mut history, &["c".to_string(), "a".to_string()]);
+        assert_eq!(
+            history.iter().map(|i| i.id.as_str()).collect::<Vec<_>>(),
+            vec!["c", "a", "b"]
+        );
+    }
+
+    #[test]
+    fn test_apply_pin_order_empty_inputs_early_return() {
+        let mut history = vec![img_item("a")];
+        apply_pin_order(&mut history, &[]);
+        assert_eq!(history.len(), 1);
+        assert_eq!(history[0].id, "a");
     }
 }
