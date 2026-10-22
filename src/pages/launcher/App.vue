@@ -224,6 +224,7 @@
 </template>
 
 <script setup>
+import {IPC_COMMANDS} from '../../services/ipc.js'
 import {computed, onBeforeUnmount, onMounted, ref} from 'vue'
 import {ElConfigProvider, ElMessage, ElMessageBox} from 'element-plus'
 import {Close, Grid, List, Loading, Plus, Refresh, Setting, Tools} from '@element-plus/icons-vue'
@@ -269,9 +270,9 @@ let unlistenResize = null
 
 const loadAllApps = async () => {
   try {
-    const apps = await invoke('get_all_apps')
+    const apps = await invoke(IPC_COMMANDS.GET_ALL_APPS)
     allApps.value = apps.sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0))
-    launcherConfig.value = await invoke('get_launcher_config')
+    launcherConfig.value = await invoke(IPC_COMMANDS.GET_LAUNCHER_CONFIG)
     viewMode.value = launcherConfig.value.view_mode || 'list'
     loadIcons()
     // 加载自定义命令
@@ -288,9 +289,9 @@ const loadAllApps = async () => {
 const handleFirstScan = async () => {
   isLoading.value = true
   try {
-    const apps = await invoke('scan_and_save_apps')
+    const apps = await invoke(IPC_COMMANDS.SCAN_AND_SAVE_APPS)
     allApps.value = apps
-    launcherConfig.value = await invoke('get_launcher_config')
+    launcherConfig.value = await invoke(IPC_COMMANDS.GET_LAUNCHER_CONFIG)
     viewMode.value = launcherConfig.value.view_mode || 'list'
     await loadIcons()
     // 加载自定义命令
@@ -307,9 +308,9 @@ const handleRefresh = async () => {
   if (isRefreshing.value) return
   isRefreshing.value = true
   try {
-    const apps = await invoke('scan_and_save_apps')
+    const apps = await invoke(IPC_COMMANDS.SCAN_AND_SAVE_APPS)
     allApps.value = apps
-    launcherConfig.value = await invoke('get_launcher_config')
+    launcherConfig.value = await invoke(IPC_COMMANDS.GET_LAUNCHER_CONFIG)
     await loadIcons()
     ElMessage.success(t('launcher.refreshed'))
     commandResults.value = []
@@ -327,7 +328,7 @@ const loadIcons = async () => {
   if (paths.length === 0) return
 
   try {
-    const icons = await invoke('batch_extract_icons', {paths})
+    const icons = await invoke(IPC_COMMANDS.BATCH_EXTRACT_ICONS, {paths})
     allApps.value = allApps.value.map(app => {
       if (app.path && icons[app.path]) {
         return {...app, icon_base64: icons[app.path]}
@@ -366,7 +367,7 @@ const toggleViewMode = async () => {
   if (!hasCategorizedApps.value) return
   const newMode = viewMode.value === 'category' ? 'list' : 'category'
   try {
-    await invoke('set_launcher_view_mode', {mode: newMode})
+    await invoke(IPC_COMMANDS.SET_LAUNCHER_VIEW_MODE, {mode: newMode})
     viewMode.value = newMode
   } catch (error) {
     console.error('Toggle view mode error:', error)
@@ -459,7 +460,7 @@ const handleSelect = async (item) => {
             t('launcher.appNotFoundTitle'),
             {confirmButtonText: t('common.remove'), cancelButtonText: t('common.cancel'), type: 'warning'}
         )
-        await invoke('remove_app_record', {appId: item.id})
+        await invoke(IPC_COMMANDS.REMOVE_APP_RECORD, {appId: item.id})
         allApps.value = allApps.value.filter(a => a.id !== item.id)
         ElMessage.success(t('launcher.appRemoved'))
       } catch {
@@ -472,7 +473,7 @@ const handleSelect = async (item) => {
 
 const hideLauncher = async () => {
   try {
-    await invoke('hide_launcher')
+    await invoke(IPC_COMMANDS.HIDE_LAUNCHER)
   } catch (error) {
     console.error('Hide window error:', error)
   }
@@ -500,27 +501,27 @@ const startDrag = async (event) => {
 }
 
 const handleCategoryUpdated = async () => {
-  launcherConfig.value = await invoke('get_launcher_config')
+  launcherConfig.value = await invoke(IPC_COMMANDS.GET_LAUNCHER_CONFIG)
   // 重新加载自定义命令
   await loadCustomCommands()
 }
 
 const handleCategoryChanged = async () => {
-  launcherConfig.value = await invoke('get_launcher_config')
-  allApps.value = await invoke('get_all_apps')
+  launcherConfig.value = await invoke(IPC_COMMANDS.GET_LAUNCHER_CONFIG)
+  allApps.value = await invoke(IPC_COMMANDS.GET_ALL_APPS)
   await loadCustomCommands()
 }
 
 const handleCommandUpdated = async () => {
   // 当命令发生变化时，重新加载配置和自定义命令
-  launcherConfig.value = await invoke('get_launcher_config')
+  launcherConfig.value = await invoke(IPC_COMMANDS.GET_LAUNCHER_CONFIG)
   await loadCustomCommands()
 }
 
 const handleReorderApps = async (reorderedApps) => {
   const orders = reorderedApps.map((app, index) => [app.id, index])
   try {
-    await invoke('update_app_sort_orders', {orders})
+    await invoke(IPC_COMMANDS.UPDATE_APP_SORT_ORDERS, {orders})
     for (const [appId, sortOrder] of orders) {
       const app = allApps.value.find(a => a.id === appId)
       if (app) {
@@ -555,8 +556,8 @@ const browseManualFile = async () => {
 const confirmAddManual = async () => {
   if (!manualForm.value.name.trim() || !manualForm.value.path) return
   try {
-    await invoke('add_manual_app', {title: manualForm.value.name.trim(), path: manualForm.value.path})
-    allApps.value = await invoke('get_all_apps')
+    await invoke(IPC_COMMANDS.ADD_MANUAL_APP, {title: manualForm.value.name.trim(), path: manualForm.value.path})
+    allApps.value = await invoke(IPC_COMMANDS.GET_ALL_APPS)
     manualForm.value = {name: '', path: ''}
     showAddManualDialog.value = false
     ElMessage.success(t('launcher.appAdded'))
@@ -598,7 +599,7 @@ const handleReorderCategories = async (fromIndex, toIndex) => {
     if (__DEV_PANEL__) {
       console.log('Calling reorder_categories with IDs:', categoryIds)
     }
-    const result = await invoke('reorder_categories', {categoryIds})
+    const result = await invoke(IPC_COMMANDS.REORDER_CATEGORIES, {categoryIds})
     if (__DEV_PANEL__) {
       console.log('reorder_categories result:', result)
     }
@@ -609,7 +610,7 @@ const handleReorderCategories = async (fromIndex, toIndex) => {
 
 const handleReorder = async (orders) => {
   try {
-    await invoke('update_app_sort_orders', {orders})
+    await invoke(IPC_COMMANDS.UPDATE_APP_SORT_ORDERS, {orders})
     for (const [appId, sortOrder] of orders) {
       const app = allApps.value.find(a => a.id === appId)
       if (app) {

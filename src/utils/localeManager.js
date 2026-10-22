@@ -1,3 +1,4 @@
+import {IPC_COMMANDS} from '../services/ipc.js'
 import {createI18n} from 'vue-i18n'
 import {invoke} from '@tauri-apps/api/core'
 
@@ -30,7 +31,7 @@ export function setLocale(locale) {
     document.documentElement.setAttribute('lang', locale)
     const seq = ++localeSaveSeq
     pendingLocaleSave = true
-    invoke('set_locale', {locale}).then(() => {
+    invoke(IPC_COMMANDS.SET_LOCALE, {locale}).then(() => {
         if (seq === localeSaveSeq) pendingLocaleSave = false
     }).catch(err => {
         console.warn('[LocaleManager] 保存语言到后端失败:', err)
@@ -42,7 +43,7 @@ export function setLocale(locale) {
 /** 从后端同步语言；本地有在途保存时不覆盖，并返回本地值 */
 export async function fetchLocale() {
     try {
-        const backendLocale = await invoke('get_locale')
+        const backendLocale = await invoke(IPC_COMMANDS.GET_LOCALE)
         if (SUPPORTED_LOCALES.includes(backendLocale)) {
             if (pendingLocaleSave) {
                 return getLocale()

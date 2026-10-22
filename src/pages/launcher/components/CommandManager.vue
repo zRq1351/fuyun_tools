@@ -162,6 +162,7 @@
 </template>
 
 <script setup>
+import {IPC_COMMANDS} from '../../../services/ipc.js'
 import {ref, watch} from 'vue'
 import {useI18n} from 'vue-i18n'
 import {ElMessage, ElMessageBox} from 'element-plus'
@@ -189,7 +190,7 @@ const editForm = ref({
 // 加载命令列表
 const loadCommands = async () => {
   try {
-    const config = await invoke('get_launcher_config')
+    const config = await invoke(IPC_COMMANDS.GET_LAUNCHER_CONFIG)
     commands.value = config.custom_commands || []
   } catch (error) {
     console.error('加载命令失败:', error)
@@ -215,7 +216,7 @@ const getCommandTypeLabel = (type) => {
 // 切换启用状态
 const toggleCommand = async (cmd) => {
   try {
-    await invoke('toggle_custom_command', {commandId: cmd.id})
+    await invoke(IPC_COMMANDS.TOGGLE_CUSTOM_COMMAND, {commandId: cmd.id})
     await loadCommands()
     emit('updated')
   } catch (error) {
@@ -238,7 +239,7 @@ const deleteCommand = async (cmd) => {
   }
 
   try {
-    await invoke('remove_custom_command', {commandId: cmd.id})
+    await invoke(IPC_COMMANDS.REMOVE_CUSTOM_COMMAND, {commandId: cmd.id})
     await loadCommands()
     emit('updated')
     ElMessage.success(t('launcher.appRemoved'))
@@ -280,7 +281,7 @@ const confirmEdit = async () => {
     const originalPrefix = editingCommand.value.prefix
     const prefixParam = finalPrefix !== originalPrefix ? finalPrefix : null
 
-    await invoke('update_custom_command', {
+    await invoke(IPC_COMMANDS.UPDATE_CUSTOM_COMMAND, {
       commandId: editingCommand.value.id,
       prefix: prefixParam,
       title: editForm.value.title !== editingCommand.value.title ? editForm.value.title : null,

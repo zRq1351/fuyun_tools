@@ -1,3 +1,4 @@
+import {IPC_COMMANDS} from '../../../services/ipc.js'
 import {ref} from 'vue'
 import {useI18n} from 'vue-i18n'
 import {ElMessage, ElMessageBox} from 'element-plus'
@@ -16,7 +17,7 @@ export function useAppActions(emit) {
     const openAppDirectory = async (app) => {
         if (!app || !app.path) return
         try {
-            await invoke('open_app_directory', {path: app.path})
+            await invoke(IPC_COMMANDS.OPEN_APP_DIRECTORY, {path: app.path})
         } catch (error) {
             console.error('打开应用目录失败:', error)
         }
@@ -35,7 +36,7 @@ export function useAppActions(emit) {
             return // 用户取消，不发 invoke
         }
         try {
-            await invoke('remove_app_record', {appId: app.id})
+            await invoke(IPC_COMMANDS.REMOVE_APP_RECORD, {appId: app.id})
             emit('category-changed')
         } catch (error) {
             console.error('Remove app error:', error)
@@ -45,7 +46,7 @@ export function useAppActions(emit) {
     const removeFromCategory = async (app) => {
         if (!app || !app.id) return
         try {
-            await invoke('set_app_category', {appId: app.id, categoryId: ''})
+            await invoke(IPC_COMMANDS.SET_APP_CATEGORY, {appId: app.id, categoryId: ''})
             emit('category-changed')
         } catch (error) {
             console.error('Remove category error:', error)
@@ -72,7 +73,7 @@ export function useAppActions(emit) {
 
         try {
             // Load config to check for existing commands
-            const config = await invoke('get_launcher_config')
+            const config = await invoke(IPC_COMMANDS.GET_LAUNCHER_CONFIG)
             const existingCommands = config.custom_commands || []
 
             // Check if app already has a command
@@ -133,7 +134,7 @@ export function useAppActions(emit) {
                 }
             }
 
-            await invoke('add_custom_command', {
+            await invoke(IPC_COMMANDS.ADD_CUSTOM_COMMAND, {
                 prefix: finalPrefix,
                 title: app.title,
                 description: t('launcher.launchApp', {title: app.title}),

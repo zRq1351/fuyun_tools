@@ -195,7 +195,7 @@ import {useI18n} from 'vue-i18n'
 import {getCurrentWebviewWindow} from '@tauri-apps/api/webviewWindow'
 import {PhysicalPosition, PhysicalSize} from '@tauri-apps/api/dpi'
 import {currentMonitor} from '@tauri-apps/api/window'
-import {DocumentService} from '../../services/ipc.js'
+import {DocumentService, IPC_COMMANDS} from '../../services/ipc.js'
 import {useWindowDpi} from '../../composables/useWindowDpi'
 import ContextMenu from '../../components/ContextMenu.vue'
 import {
@@ -653,7 +653,7 @@ async function openFile(file) {
 async function openFullManager() {
   try {
     const {invoke} = await import('@tauri-apps/api/core')
-    await invoke('show_document_manager')
+    await invoke(IPC_COMMANDS.SHOW_DOCUMENT_MANAGER)
   } catch (e) {
     console.error('打开文档管理器失败:', e)
   }
@@ -719,7 +719,7 @@ async function pollCursorDock() {
   if (dockAnim || ctxMenuShow.value || dialogOpen.value) return
   try {
     const {invoke} = await import('@tauri-apps/api/core')
-    const [cx, cy] = await invoke('get_physical_cursor_position')
+    const [cx, cy] = await invoke(IPC_COMMANDS.GET_PHYSICAL_CURSOR_POSITION)
     const [pos, size] = await Promise.all([
       appWindow.outerPosition(),
       appWindow.outerSize(),

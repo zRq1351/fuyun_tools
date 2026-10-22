@@ -152,6 +152,80 @@ export const IPC_COMMANDS = {
     CHECK_RECORDING_FFMPEG: 'check_recording_ffmpeg',
     DOWNLOAD_RECORDING_FFMPEG: 'download_recording_ffmpeg',
 
+    // 截图
+    START_SCREENSHOT: 'start_screenshot',
+    OPEN_SCREENSHOT_EDITOR: 'open_screenshot_editor',
+    GET_SCREENSHOT_DATA: 'get_screenshot_data',
+    CLOSE_SCREENSHOT_WINDOW: 'close_screenshot_window',
+    SET_SCREENSHOT_WINDOW_VISIBLE: 'set_screenshot_window_visible',
+    SET_SCREENSHOT_CLIPBOARD_LINK_ONCE: 'set_screenshot_clipboard_link_once',
+    CHOOSE_SCREENSHOT_SAVE_PATH: 'choose_screenshot_save_path',
+    SAVE_SCREENSHOT_TO_PATH: 'save_screenshot_to_path',
+    EXPORT_SCREENSHOT_TO_PATH: 'export_screenshot_to_path',
+    COPY_SCREENSHOT_TO_CLIPBOARD: 'copy_screenshot_to_clipboard',
+    RENDER_SCREENSHOT_TO_PNG_DATA: 'render_screenshot_to_png_data',
+    PIN_SCREENSHOT_ON_SCREEN: 'pin_screenshot_on_screen',
+
+    // 长截图
+    SHOW_LONGSHOT_BORDER: 'show_longshot_border',
+    HIDE_LONGSHOT_BORDER: 'hide_longshot_border',
+    SHOW_LONGSHOT_TOOLBAR: 'show_longshot_toolbar',
+    HIDE_LONGSHOT_TOOLBAR: 'hide_longshot_toolbar',
+    LONGSHOT_TOOLBAR_ACTION: 'longshot_toolbar_action',
+    SNAP_LONGSHOT_TOOLBAR_WINDOW: 'snap_longshot_toolbar_window',
+
+    // 贴图与 OCR
+    SHOW_OCR_TEXT_WINDOW: 'show_ocr_text_window',
+    RECOGNIZE_IMAGE_OCR: 'recognize_image_ocr',
+    CLOSE_PINNED_IMAGE_WINDOW: 'close_pinned_image_window',
+
+    // 录屏悬浮窗
+    NOTIFY_RECORDING_REGION_SELECTED: 'notify_recording_region_selected',
+
+    // 启动器
+    GET_ALL_APPS: 'get_all_apps',
+    SCAN_AND_SAVE_APPS: 'scan_and_save_apps',
+    GET_LAUNCHER_CONFIG: 'get_launcher_config',
+    SET_LAUNCHER_VIEW_MODE: 'set_launcher_view_mode',
+    HIDE_LAUNCHER: 'hide_launcher',
+    BATCH_EXTRACT_ICONS: 'batch_extract_icons',
+    ADD_MANUAL_APP: 'add_manual_app',
+    REMOVE_APP_RECORD: 'remove_app_record',
+    SET_APP_CATEGORY: 'set_app_category',
+    UPDATE_APP_SORT_ORDERS: 'update_app_sort_orders',
+    ADD_LAUNCHER_CATEGORY: 'add_launcher_category',
+    REMOVE_LAUNCHER_CATEGORY: 'remove_launcher_category',
+    RENAME_LAUNCHER_CATEGORY: 'rename_launcher_category',
+    REORDER_CATEGORIES: 'reorder_categories',
+    UPDATE_CATEGORY_ICON: 'update_category_icon',
+    ADD_CUSTOM_COMMAND: 'add_custom_command',
+    UPDATE_CUSTOM_COMMAND: 'update_custom_command',
+    REMOVE_CUSTOM_COMMAND: 'remove_custom_command',
+    TOGGLE_CUSTOM_COMMAND: 'toggle_custom_command',
+    LAUNCH_APP: 'launch_app',
+    LAUNCH_APP_WITH_ARGS: 'launch_app_with_args',
+    OPEN_FILE: 'open_file',
+    OPEN_APP_DIRECTORY: 'open_app_directory',
+    SHOW_CLIPBOARD_WINDOW_COMMAND: 'show_clipboard_window_command',
+    SHOW_STANDARD_WINDOW_COMMAND: 'show_standard_window_command',
+    START_SCREENSHOT_COMMAND: 'start_screenshot_command',
+    TOGGLE_RECORDING_COMMAND: 'toggle_recording_command',
+
+    // 文档小部件
+    SHOW_DOCUMENT_MANAGER: 'show_document_manager',
+    SHOW_DOC_MANAGER_WIDGET: 'show_doc_manager_widget',
+    HIDE_DOC_MANAGER_WIDGET: 'hide_doc_manager_widget',
+    GET_PHYSICAL_CURSOR_POSITION: 'get_physical_cursor_position',
+
+    // 系统设置
+    GET_THEME: 'get_theme',
+    SET_THEME: 'set_theme',
+    GET_LOCALE: 'get_locale',
+    SET_LOCALE: 'set_locale',
+
+    // 结果窗
+    NOTIFY_RESULT_WINDOW_READY: 'notify_result_window_ready',
+
     // 文档管理
     ADD_DOC_ROOT: 'add_doc_root',
     GET_DOC_ROOTS: 'get_doc_roots',

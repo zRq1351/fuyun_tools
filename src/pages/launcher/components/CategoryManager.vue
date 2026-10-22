@@ -137,6 +137,7 @@
 </template>
 
 <script setup>
+import {IPC_COMMANDS} from '../../../services/ipc.js'
 import {ref, nextTick, watch, onMounted, onBeforeUnmount} from 'vue'
 import {useI18n} from 'vue-i18n'
 import {ElMessageBox} from 'element-plus'
@@ -208,12 +209,12 @@ const confirmDialog = async () => {
 
   try {
     if (editingCategory.value) {
-      await invoke('rename_launcher_category', {
+      await invoke(IPC_COMMANDS.RENAME_LAUNCHER_CATEGORY, {
         categoryId: editingCategory.value.id,
         newName: name
       })
     } else {
-      await invoke('add_launcher_category', {
+      await invoke(IPC_COMMANDS.ADD_LAUNCHER_CATEGORY, {
         name,
         icon: 'Grid'
       })
@@ -237,7 +238,7 @@ const handleDelete = async (category) => {
     return // 用户取消，不发 invoke
   }
   try {
-    await invoke('remove_launcher_category', {categoryId: category.id})
+    await invoke(IPC_COMMANDS.REMOVE_LAUNCHER_CATEGORY, {categoryId: category.id})
     emit('updated')
   } catch (error) {
     console.error('Delete category error:', error)
@@ -298,7 +299,7 @@ const initCategoriesSortable = () => {
         // 调用后端API保存新顺序
         try {
           const categoryIds = newCategories.map(c => c.id)
-          await invoke('reorder_categories', {categoryIds})
+          await invoke(IPC_COMMANDS.REORDER_CATEGORIES, {categoryIds})
           emit('updated')
         } catch (error) {
           console.error('Reorder categories error:', error)
@@ -325,7 +326,7 @@ const selectIcon = async (iconName) => {
   if (!currentEditingCategory.value) return
 
   try {
-    await invoke('update_category_icon', {
+    await invoke(IPC_COMMANDS.UPDATE_CATEGORY_ICON, {
       categoryId: currentEditingCategory.value.id,
       icon: iconName
     })

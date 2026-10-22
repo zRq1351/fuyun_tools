@@ -61,6 +61,15 @@ export default [
             'no-unused-vars': ['warn', {argsIgnorePattern: '^_'}],
             'no-console': ['warn', {allow: ['warn', 'error']}],
             'no-empty': ['warn', {allowEmptyCatch: true}],
+            // IPC 命令名必须走 services/ipc.js 的 IPC_COMMANDS 常量表：
+            // 避免字符串字面量拼写错误只能运行时暴露，同时保留统一错误上下文
+            'no-restricted-syntax': [
+                'error',
+                {
+                    selector: "CallExpression[callee.name='invoke'][arguments.0.type='Literal']",
+                    message: '禁止裸字符串 invoke 调用，请使用 IPC_COMMANDS 常量：invoke(IPC_COMMANDS.XXX)。新命令先在 services/ipc.js 的 IPC_COMMANDS 中登记。',
+                },
+            ],
         },
     },
     {

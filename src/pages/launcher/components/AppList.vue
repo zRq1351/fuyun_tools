@@ -274,6 +274,7 @@
 </template>
 
 <script setup>
+import {IPC_COMMANDS} from '../../../services/ipc.js'
 import {computed, nextTick, onBeforeUnmount, onMounted, ref, watch} from 'vue'
 import {useI18n} from 'vue-i18n'
 import * as ElementPlusIconsVue from '@element-plus/icons-vue'
@@ -392,7 +393,7 @@ const updateSectionHeights = async () => {
 
 const loadCategories = async () => {
   try {
-    const config = await invoke('get_launcher_config')
+    const config = await invoke(IPC_COMMANDS.GET_LAUNCHER_CONFIG)
     customCategories.value = config.categories || []
   } catch (error) {
     console.error('Load categories error:', error)
@@ -425,7 +426,7 @@ const closeCtxMenu = () => {
 const assignToCategory = async (app, categoryId) => {
   if (!app || !app.id) return
   try {
-    await invoke('set_app_category', {appId: app.id, categoryId})
+    await invoke(IPC_COMMANDS.SET_APP_CATEGORY, {appId: app.id, categoryId})
     closeCtxMenu()
     emit('category-changed')
   } catch (error) {

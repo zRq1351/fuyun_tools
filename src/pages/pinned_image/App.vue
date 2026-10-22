@@ -85,6 +85,7 @@
 </template>
 
 <script setup>
+import {IPC_COMMANDS} from '../../services/ipc.js'
 import {onMounted, onUnmounted, ref, watch} from 'vue'
 import {invoke} from '@tauri-apps/api/core'
 import {useI18n} from 'vue-i18n'
@@ -171,7 +172,7 @@ async function closeWindow() {
   closeCtxMenu()
   try {
     if (windowLabel.value) {
-      await invoke('close_pinned_image_window', {label: windowLabel.value})
+      await invoke(IPC_COMMANDS.CLOSE_PINNED_IMAGE_WINDOW, {label: windowLabel.value})
       return
     }
     window.close()
@@ -219,7 +220,7 @@ async function openTextWindow() {
   const text = ocrLines.value.map(line => (line?.text || '').trim()).filter(Boolean).join('\n').trim()
   if (!text) return
   try {
-    await invoke('show_ocr_text_window', {
+    await invoke(IPC_COMMANDS.SHOW_OCR_TEXT_WINDOW, {
       sourceLabel: windowLabel.value || 'pinned_image_window',
       text
     })
@@ -273,7 +274,7 @@ async function runOcr(base64, width, height, engine = null) {
     if (engine) {
       payload.engine = engine
     }
-    const result = await invoke('recognize_image_ocr', payload)
+    const result = await invoke(IPC_COMMANDS.RECOGNIZE_IMAGE_OCR, payload)
     if (taskId !== ocrTaskId) return []
     if (!result?.success) {
       showToast(result?.error || t('pinnedImage.ocrFailed'), true)

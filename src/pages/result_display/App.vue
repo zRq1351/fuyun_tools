@@ -207,6 +207,7 @@
 </template>
 
 <script setup>
+import {IPC_COMMANDS} from '../../services/ipc.js'
 import {computed, nextTick, onBeforeUnmount, onMounted, ref, watch} from 'vue'
 import {marked} from 'marked'
 import DOMPurify from 'dompurify'
@@ -503,7 +504,7 @@ onMounted(async () => {
 
     if (currentWindowLabel.value) {
       try {
-        await invoke('notify_result_window_ready', {windowLabel: currentWindowLabel.value})
+        await invoke(IPC_COMMANDS.NOTIFY_RESULT_WINDOW_READY, {windowLabel: currentWindowLabel.value})
       } catch (e) {
         console.error('Failed to notify window ready:', e)
       }

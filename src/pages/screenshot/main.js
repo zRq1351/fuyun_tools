@@ -1,3 +1,4 @@
+import {IPC_COMMANDS} from '../../services/ipc.js'
 import {invoke} from '@tauri-apps/api/core'
 import {createPageApp} from '../../utils/createPageApp'
 import App from './App.vue'
@@ -18,7 +19,7 @@ window.__SCREENSHOT_BOOT_READY__ = true
 
 document.addEventListener('keydown', (event) => {
     if (event.key === 'Escape' && !window.__SCREENSHOT_KEYDOWN_HANDLER_READY__) {
-        invoke('close_screenshot_window').catch(() => {
+        invoke(IPC_COMMANDS.CLOSE_SCREENSHOT_WINDOW).catch(() => {
         })
     }
 })

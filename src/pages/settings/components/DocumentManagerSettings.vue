@@ -132,6 +132,7 @@
 </template>
 
 <script setup>
+import {IPC_COMMANDS} from '../../../services/ipc.js'
 import {ref} from 'vue'
 import {useI18n} from 'vue-i18n'
 import {Collection, Edit, FolderAdd, RefreshLeft, Search, VideoPause} from '@element-plus/icons-vue'
@@ -183,9 +184,9 @@ const onWidgetToggle = async (val) => {
   try {
     const {invoke} = await import('@tauri-apps/api/core')
     if (val) {
-      await invoke('show_doc_manager_widget')
+      await invoke(IPC_COMMANDS.SHOW_DOC_MANAGER_WIDGET)
     } else {
-      await invoke('hide_doc_manager_widget')
+      await invoke(IPC_COMMANDS.HIDE_DOC_MANAGER_WIDGET)
     }
   } catch (e) {
     console.error('切换文档管理小部件失败:', e)

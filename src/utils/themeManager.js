@@ -6,6 +6,7 @@
  * localStorage 仅作为同步缓存，不作为持久存储
  */
 
+import {IPC_COMMANDS} from '../services/ipc.js'
 import {invoke} from '@tauri-apps/api/core'
 
 const THEME_KEY = 'fuyun-theme'
@@ -24,7 +25,7 @@ let pendingThemeSave = false
  */
 export async function fetchTheme() {
     try {
-        const theme = await invoke('get_theme')
+        const theme = await invoke(IPC_COMMANDS.GET_THEME)
         if (THEMES.includes(theme)) {
             // 本地刚改过、后端可能尚未写完：不覆盖
             if (pendingThemeSave) {
@@ -63,7 +64,7 @@ export function setTheme(theme) {
     const seq = ++themeSaveSeq
     pendingThemeSave = true
     const saveWithRetry = (retries = 2) => {
-        invoke('set_theme', {theme}).then(() => {
+        invoke(IPC_COMMANDS.SET_THEME, {theme}).then(() => {
             if (seq === themeSaveSeq) {
                 pendingThemeSave = false
             }
@@ -97,7 +98,7 @@ export function applyTheme(theme) {
 export function resetToSystemTheme() {
     localStorage.removeItem(THEME_KEY)
     applyTheme(getSystemTheme())
-    invoke('set_theme', {theme: getSystemTheme()}).catch(err => {
+    invoke(IPC_COMMANDS.SET_THEME, {theme: getSystemTheme()}).catch(err => {
         console.debug('[ThemeManager] 重置主题到系统主题失败:', err?.message || err)
     })
 }

@@ -368,6 +368,7 @@
 </template>
 
 <script setup>
+import {IPC_COMMANDS} from '../../services/ipc.js'
 import {computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch} from "vue";
 import {useI18n} from "vue-i18n";
 import {useLocale} from "@/composables/useLocale.js";
@@ -675,7 +676,7 @@ const pickRecordingRegion = async () => {
   await new Promise(resolve => setTimeout(resolve, 300));
 
   try {
-    await invoke("open_screenshot_editor", {mode: "recording_region"});
+    await invoke(IPC_COMMANDS.OPEN_SCREENSHOT_EDITOR, {mode: "recording_region"});
   } catch (e) {
     showInlineNotice(t('recordingToolbar.openRegionFailed', {error: String(e)}), "error");
     // 失败时重新显示工具栏
@@ -771,7 +772,7 @@ const toggleRecordingState = async () => {
     if (!recordingFeatureEnabled.value) {
       // 功能停用时点击引导到设置页的录屏标签开启，而不是静默无反应
       try {
-        await invoke('open_settings_window', {tab: 'recording', reason: 'enable_recording'});
+        await invoke(IPC_COMMANDS.OPEN_SETTINGS_WINDOW, {tab: 'recording', reason: 'enable_recording'});
       } catch (e) {
         console.error('打开录屏设置失败:', e);
       }

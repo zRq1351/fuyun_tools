@@ -86,6 +86,7 @@
 </template>
 
 <script setup>
+import {IPC_COMMANDS} from '../../services/ipc.js'
 import {computed, onMounted, onUnmounted, ref} from 'vue'
 import {invoke} from '@tauri-apps/api/core'
 import {listen} from '@tauri-apps/api/event'
@@ -110,7 +111,7 @@ let snapTimer = null
 
 const togglePause = async () => {
   try {
-    await invoke('longshot_toolbar_action', {action: paused.value ? 'resume' : 'pause'})
+    await invoke(IPC_COMMANDS.LONGSHOT_TOOLBAR_ACTION, {action: paused.value ? 'resume' : 'pause'})
   } catch (e) {
     console.error('longshot togglePause failed:', e)
   }
@@ -118,7 +119,7 @@ const togglePause = async () => {
 
 const finish = async () => {
   try {
-    await invoke('longshot_toolbar_action', {action: 'finish'})
+    await invoke(IPC_COMMANDS.LONGSHOT_TOOLBAR_ACTION, {action: 'finish'})
   } catch (e) {
     console.error('longshot finish failed:', e)
   }
@@ -126,7 +127,7 @@ const finish = async () => {
 
 const cancel = async () => {
   try {
-    await invoke('longshot_toolbar_action', {action: 'cancel'})
+    await invoke(IPC_COMMANDS.LONGSHOT_TOOLBAR_ACTION, {action: 'cancel'})
   } catch (e) {
     console.error('longshot cancel failed:', e)
   }
@@ -207,7 +208,7 @@ onUnmounted(() => {
 function scheduleSnap() {
   if (snapTimer) clearTimeout(snapTimer)
   snapTimer = setTimeout(() => {
-    invoke('snap_longshot_toolbar_window').catch(() => {
+    invoke(IPC_COMMANDS.SNAP_LONGSHOT_TOOLBAR_WINDOW).catch(() => {
     })
   }, 80)
 }

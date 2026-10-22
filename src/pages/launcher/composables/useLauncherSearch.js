@@ -1,3 +1,4 @@
+import {IPC_COMMANDS} from '../../../services/ipc.js'
 import {invoke} from '@tauri-apps/api/core'
 import {ElMessage} from 'element-plus'
 import {useI18n} from 'vue-i18n'
@@ -16,7 +17,7 @@ export function useLauncherSearch() {
 
     const loadCustomCommands = async () => {
         try {
-            const config = await invoke('get_launcher_config')
+            const config = await invoke(IPC_COMMANDS.GET_LAUNCHER_CONFIG)
             customCommandsCache = (config.custom_commands || [])
                 .filter(cmd => cmd.enabled)
                 .map(cmd => ({
@@ -99,33 +100,33 @@ export function useLauncherSearch() {
         try {
             switch (action) {
                 case 'open_settings':
-                    await invoke('show_standard_window_command', {label: 'settings'})
+                    await invoke(IPC_COMMANDS.SHOW_STANDARD_WINDOW_COMMAND, {label: 'settings'})
                     break
                 case 'open_clipboard':
-                    await invoke('show_clipboard_window_command')
+                    await invoke(IPC_COMMANDS.SHOW_CLIPBOARD_WINDOW_COMMAND)
                     break
                 case 'start_screenshot':
-                    await invoke('start_screenshot_command')
+                    await invoke(IPC_COMMANDS.START_SCREENSHOT_COMMAND)
                     break
                 case 'start_recording':
-                    await invoke('toggle_recording_command')
+                    await invoke(IPC_COMMANDS.TOGGLE_RECORDING_COMMAND)
                     break
                 case 'custom_command':
                     await executeCustomCommand(item)
                     break
                 case 'launch_app':
                     if (item.path) {
-                        await invoke('launch_app', {appId: item.id, path: item.path})
+                        await invoke(IPC_COMMANDS.LAUNCH_APP, {appId: item.id, path: item.path})
                     }
                     break
                 case 'open_file':
                     if (item.path) {
-                        await invoke('open_file', {path: item.path})
+                        await invoke(IPC_COMMANDS.OPEN_FILE, {path: item.path})
                     }
                     break
                 default:
                     if (item.path) {
-                        await invoke('launch_app', {appId: item.id, path: item.path})
+                        await invoke(IPC_COMMANDS.LAUNCH_APP, {appId: item.id, path: item.path})
                     }
             }
         } catch (error) {
@@ -155,21 +156,21 @@ export function useLauncherSearch() {
 
         try {
             if (cmdType.OpenWindow) {
-                await invoke('show_standard_window_command', {label: cmdType.OpenWindow.label})
+                await invoke(IPC_COMMANDS.SHOW_STANDARD_WINDOW_COMMAND, {label: cmdType.OpenWindow.label})
             } else if (cmdType.ExecuteAction) {
                 const action = cmdType.ExecuteAction.action
                 switch (action) {
                     case 'screenshot':
-                        await invoke('start_screenshot_command')
+                        await invoke(IPC_COMMANDS.START_SCREENSHOT_COMMAND)
                         break
                     case 'recording':
-                        await invoke('toggle_recording_command')
+                        await invoke(IPC_COMMANDS.TOGGLE_RECORDING_COMMAND)
                         break
                     default:
                         console.warn(t('launcher.unknownCustomAction'), action)
                 }
             } else if (cmdType.CopyText) {
-                await invoke('copy_text', {text: cmdType.CopyText.text})
+                await invoke(IPC_COMMANDS.COPY_TEXT, {text: cmdType.CopyText.text})
             } else if (cmdType.RunProgram) {
                 if (!cmdType.RunProgram.path) {
                     throw new Error(t('launcher.emptyProgramPath'))
@@ -177,13 +178,13 @@ export function useLauncherSearch() {
 
                 const hasArgs = cmdType.RunProgram.args && cmdType.RunProgram.args.trim() !== ''
                 if (hasArgs) {
-                    await invoke('launch_app_with_args', {
+                    await invoke(IPC_COMMANDS.LAUNCH_APP_WITH_ARGS, {
                         appId: item.id || 'custom_command',
                         path: cmdType.RunProgram.path,
                         args: cmdType.RunProgram.args
                     })
                 } else {
-                    await invoke('launch_app', {
+                    await invoke(IPC_COMMANDS.LAUNCH_APP, {
                         appId: item.id || 'custom_command',
                         path: cmdType.RunProgram.path
                     })

@@ -614,6 +614,7 @@
 </template>
 
 <script setup>
+import {IPC_COMMANDS} from '../../services/ipc.js'
 import {computed, nextTick, onMounted, onUnmounted, reactive, ref, watchPostEffect} from 'vue'
 import {invoke} from '@tauri-apps/api/core'
 import {buildFileUrlFromPath} from '../../utils/fileUrl'
@@ -884,7 +885,7 @@ const canCropToSelection = computed(() =>
 async function resolveCropDataUrl() {
   // asset:// 等会污染 canvas；有后端源路径时走 render，避免 toDataURL SecurityError
   if (sourceImagePath.value) {
-    const renderResult = await invoke('render_screenshot_to_png_data', {
+    const renderResult = await invoke(IPC_COMMANDS.RENDER_SCREENSHOT_TO_PNG_DATA, {
       request: buildBackendExportRequest('')
     })
     if (!renderResult?.success || !renderResult?.pngBase64) {
@@ -1096,12 +1097,12 @@ function cleanupManualLongshotUi(restoreVisibility = true) {
   longshotBorderShown.value = false
   regionSelectMode.value = 'screenshot'
   if (restoreVisibility) {
-    invoke('set_screenshot_window_visible', {visible: true}).catch(() => {
+    invoke(IPC_COMMANDS.SET_SCREENSHOT_WINDOW_VISIBLE, {visible: true}).catch(() => {
     })
   }
-  invoke('hide_longshot_border').catch(() => {
+  invoke(IPC_COMMANDS.HIDE_LONGSHOT_BORDER).catch(() => {
   })
-  invoke('hide_longshot_toolbar').catch(() => {
+  invoke(IPC_COMMANDS.HIDE_LONGSHOT_TOOLBAR).catch(() => {
   })
   scheduleManualLongshotAvailabilityRefresh()
 }
@@ -1354,7 +1355,7 @@ onMounted(async () => {
       confidence: confidence.toFixed(2)
     })
     if (!longshotBorderShown.value && frameCount >= 1 && pendingLongshotBorderAnchor.value) {
-      invoke('show_longshot_border', {anchor: pendingLongshotBorderAnchor.value}).catch(() => {
+      invoke(IPC_COMMANDS.SHOW_LONGSHOT_BORDER, {anchor: pendingLongshotBorderAnchor.value}).catch(() => {
       })
       longshotBorderShown.value = true
     }
@@ -1365,7 +1366,7 @@ onMounted(async () => {
     if (manualLongshotSessionId.value > 0 && sessionId !== manualLongshotSessionId.value) return
     applyManualLongshotPhase(payload)
     if (pendingLongshotBorderAnchor.value && !longshotBorderShown.value) {
-      invoke('show_longshot_border', {anchor: pendingLongshotBorderAnchor.value}).catch(() => {
+      invoke(IPC_COMMANDS.SHOW_LONGSHOT_BORDER, {anchor: pendingLongshotBorderAnchor.value}).catch(() => {
       })
       longshotBorderShown.value = true
     }
@@ -1552,7 +1553,7 @@ function handleScreenshotReset() {
 
 async function loadScreenshotSession() {
   try {
-    const result = await invoke('get_screenshot_data')
+    const result = await invoke(IPC_COMMANDS.GET_SCREENSHOT_DATA)
     if (result?.success && result.image_path) {
       sourceImagePath.value = String(result.image_path || '')
       captureOriginX.value = Number(result.origin_x) || 0
@@ -1579,7 +1580,7 @@ async function loadScreenshotSession() {
       longshotViewOffset.y = 0
       loadImageFromPath(result.image_path)
       // 图片开始加载，显示窗口
-      invoke('set_screenshot_window_visible', {visible: true}).catch(() => {
+      invoke(IPC_COMMANDS.SET_SCREENSHOT_WINDOW_VISIBLE, {visible: true}).catch(() => {
       })
       return
     }
@@ -1626,7 +1627,7 @@ function scheduleScreenshotFallback() {
 
 async function fetchWindows() {
   try {
-    const result = await invoke('get_window_list')
+    const result = await invoke(IPC_COMMANDS.GET_WINDOW_LIST)
     if (result.success) {
       const list = result.windows || []
       const maxWidth = list.reduce((max, item) => Math.max(max, Number(item?.width) || 0), 0)
@@ -1660,7 +1661,7 @@ async function requestScreenshot() {
   screenshotRequestInFlight.value = true
   screenshotRequestPromise = (async () => {
     try {
-      const result = await invoke('start_screenshot')
+      const result = await invoke(IPC_COMMANDS.START_SCREENSHOT)
       if (result.success && (result.image_path || result.png_base64)) {
         longshotResultActive.value = false
         longshotRawPngBase64.value = ''
@@ -1756,7 +1757,7 @@ async function toggleManualLongshotRunning() {
       longshotOverlayOnly.value = false
       pendingLongshotBorderAnchor.value = region
       longshotBorderShown.value = false
-      await invoke('set_screenshot_window_visible', {visible: false})
+      await invoke(IPC_COMMANDS.SET_SCREENSHOT_WINDOW_VISIBLE, {visible: false})
 
       await new Promise(resolve => setTimeout(resolve, 80))
       const result = await ScreenshotService.startManualLongshot({
@@ -1771,10 +1772,10 @@ async function toggleManualLongshotRunning() {
         manualLongshotSessionId.value = sid
         manualLongshotRunning.value = true
         manualLongshotPhase.value = 'starting'
-        await invoke('show_longshot_toolbar', {anchor: region})
+        await invoke(IPC_COMMANDS.SHOW_LONGSHOT_TOOLBAR, {anchor: region})
         manualLongshotHint.value = t('screenshot.longshotStarted')
       } else {
-        await invoke('set_screenshot_window_visible', {visible: true}).catch(() => {
+        await invoke(IPC_COMMANDS.SET_SCREENSHOT_WINDOW_VISIBLE, {visible: true}).catch(() => {
         })
         pendingLongshotBorderAnchor.value = null
         longshotBorderShown.value = false
@@ -1793,7 +1794,7 @@ async function toggleManualLongshotRunning() {
       manualLongshotHint.value = t('screenshot.longshotResumed')
     }
   } catch (error) {
-    await invoke('set_screenshot_window_visible', {visible: true}).catch(() => {})
+    await invoke(IPC_COMMANDS.SET_SCREENSHOT_WINDOW_VISIBLE, {visible: true}).catch(() => {})
     cleanupManualLongshotUi(false)
     manualLongshotPhase.value = 'failed'
     manualLongshotHint.value = t('screenshot.longshotOpFailed', {error: parseErrorMessage(String(error)) || String(error)})
@@ -1804,7 +1805,7 @@ async function finishManualLongshotCapture() {
   if (manualLongshotSessionId.value <= 0) return
   try {
     const sessionId = manualLongshotSessionId.value
-    await invoke('set_screenshot_window_visible', {visible: true})
+    await invoke(IPC_COMMANDS.SET_SCREENSHOT_WINDOW_VISIBLE, {visible: true})
     cleanupManualLongshotUi(false)
     const result = await ScreenshotService.finishManualLongshot(sessionId)
     applyManualLongshotResult(result || {})
@@ -1948,7 +1949,7 @@ function buildBackendExportRequest(outputPath) {
 async function commitRecordingRegionSelection() {
   const payload = getGlobalSelectionRect()
   try {
-    await invoke('notify_recording_region_selected', {payload})
+    await invoke(IPC_COMMANDS.NOTIFY_RECORDING_REGION_SELECTED, {payload})
   } catch (_e) {
     await emit('recording-region-selected', payload)
   }
@@ -3449,7 +3450,7 @@ async function copyPickedColor() {
   if (!pickColor.value) return
   const value = pickerDisplayValue.value || pickColor.value
   try {
-    await invoke('copy_text', {text: value})
+    await invoke(IPC_COMMANDS.COPY_TEXT, {text: value})
     pickerCopyHint.value = `已复制：${value}`
     window.setTimeout(() => {
       if (currentTool.value === 'picker') {
@@ -4183,9 +4184,9 @@ async function writeClipboardImage(linked, closeAfterCopy) {
       showCaptureError('截图源尚未就绪，请稍后重试')
       return
     }
-    await invoke('set_screenshot_clipboard_link_once', {linked})
+    await invoke(IPC_COMMANDS.SET_SCREENSHOT_CLIPBOARD_LINK_ONCE, {linked})
     if (sourceImagePath.value) {
-      const result = await invoke('copy_screenshot_to_clipboard', {
+      const result = await invoke(IPC_COMMANDS.COPY_SCREENSHOT_TO_CLIPBOARD, {
         request: buildBackendExportRequest('')
       })
       if (!result?.success) {
@@ -4224,7 +4225,7 @@ async function pinToScreenAndClose() {
     let pinHeight = 0
     const region = getGlobalSelectionRect()
     if (sourceImagePath.value) {
-      const renderResult = await invoke('render_screenshot_to_png_data', {
+      const renderResult = await invoke(IPC_COMMANDS.RENDER_SCREENSHOT_TO_PNG_DATA, {
         request: buildBackendExportRequest('')
       })
       if (!renderResult?.success) {
@@ -4250,10 +4251,10 @@ async function pinToScreenAndClose() {
     }
     let result = null
     try {
-      result = await invoke('pin_screenshot_on_screen', payload)
+      result = await invoke(IPC_COMMANDS.PIN_SCREENSHOT_ON_SCREEN, payload)
     } catch (firstError) {
       await new Promise(resolve => setTimeout(resolve, 80))
-      result = await invoke('pin_screenshot_on_screen', payload)
+      result = await invoke(IPC_COMMANDS.PIN_SCREENSHOT_ON_SCREEN, payload)
       if (!result?.success) {
         throw firstError
       }
@@ -4277,7 +4278,7 @@ async function saveAndClose() {
       return
     }
 
-    const pathResult = await invoke('choose_screenshot_save_path')
+    const pathResult = await invoke(IPC_COMMANDS.CHOOSE_SCREENSHOT_SAVE_PATH)
     if (!pathResult?.success) {
       if (pathResult?.cancelled) {
         return
@@ -4293,7 +4294,7 @@ async function saveAndClose() {
 
     if (shouldSaveRenderedImageDirectly) {
       const base64 = resolveExportBase64()
-      const result = await invoke('save_screenshot_to_path', {
+      const result = await invoke(IPC_COMMANDS.SAVE_SCREENSHOT_TO_PATH, {
         pngBase64: base64,
         outputPath: pathResult.path
       })
@@ -4306,7 +4307,7 @@ async function saveAndClose() {
     }
 
     if (sourceImagePath.value) {
-      const exportResult = await invoke('export_screenshot_to_path', {
+      const exportResult = await invoke(IPC_COMMANDS.EXPORT_SCREENSHOT_TO_PATH, {
         request: buildBackendExportRequest(pathResult.path)
       })
       if (exportResult?.success) {
@@ -4329,7 +4330,7 @@ async function close() {
   try {
 
     cancelManualLongshotCapture(false, false)
-    await invoke('close_screenshot_window')
+    await invoke(IPC_COMMANDS.CLOSE_SCREENSHOT_WINDOW)
   } catch (error) {
     console.error('关闭窗口失败:', error)
   }

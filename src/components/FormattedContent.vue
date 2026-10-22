@@ -28,9 +28,24 @@ import {ref, watch, onBeforeUnmount} from 'vue'
 import {Marked} from 'marked'
 import {markedHighlight} from 'marked-highlight'
 import DOMPurify from 'dompurify'
-import hljs from 'highlight.js'
+import hljs from 'highlight.js/lib/core'
+import json from 'highlight.js/lib/languages/json'
+import xml from 'highlight.js/lib/languages/xml'
+import javascript from 'highlight.js/lib/languages/javascript'
+import python from 'highlight.js/lib/languages/python'
+import bash from 'highlight.js/lib/languages/bash'
+import rust from 'highlight.js/lib/languages/rust'
 import {openUrl} from '@tauri-apps/plugin-opener'
 import 'highlight.js/styles/atom-one-dark.css'
+
+// 按需注册常用语言：core 仅含 plaintext；未注册语言由 highlight 回调回退 plaintext
+// xml 模块自带 html 别名
+hljs.registerLanguage('json', json)
+hljs.registerLanguage('xml', xml)
+hljs.registerLanguage('javascript', javascript)
+hljs.registerLanguage('python', python)
+hljs.registerLanguage('bash', bash)
+hljs.registerLanguage('rust', rust)
 
 const DOMPURIFY_CONFIG = {
   USE_PROFILES: {html: true},
