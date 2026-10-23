@@ -1,7 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<paths>
-    <!-- 同步收到的图片临时存放目录（供 FileProvider 生成 content:// URI 写入剪贴板） -->
-    <cache-path
-        name="synced_images"
-        path="images/" />
-</paths>
