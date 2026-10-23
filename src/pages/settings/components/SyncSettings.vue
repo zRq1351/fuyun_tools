@@ -133,7 +133,7 @@ async function refreshStatus() {
         const snapshot = await SyncService.getStatus()
         Object.assign(status, snapshot)
         enabled.value = snapshot.running
-    } catch (e) {
+    } catch {
         // 轮询失败不打扰用户（如服务刚停止的瞬间）
     }
 }
