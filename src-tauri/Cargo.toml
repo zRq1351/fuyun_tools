@@ -48,8 +48,12 @@ opencv = { version = "0.98.2", optional = true, default-features = false, featur
 zip = { version = "8.6.0", default-features = false, features = ["deflate"] }
 pdf-extract = "0.10.0"
 encoding_rs = "0.8"
-tokio = { version = "1.52.1", features = ["sync", "time"] }
+tokio = { version = "1.52.1", features = ["sync", "time", "net", "rt", "rt-multi-thread", "macros", "io-util"] }
 chrono = "0.4"
+# 锁定 0.8.8：0.8.9 的 ws 特性依赖未发布的 tokio-tungstenite 0.29（解析失败）
+axum = { version = "=0.8.8", features = ["ws"] }
+mdns-sd = "0.11"
+uuid = { version = "1", features = ["v4"] }
 fs_extra = "1.3"
 scopeguard = "1.2.0"
 windows = { version = "0.62.2", features = ["Win32_UI_WindowsAndMessaging", "Win32_Foundation", "Win32_System_LibraryLoader", "Win32_System_Threading", "Win32_System_JobObjects", "Win32_Graphics_Dwm", "Win32_UI_Shell", "Win32_UI_Input_KeyboardAndMouse", "Win32_System_Com", "Win32_Storage_FileSystem", "Win32_UI_HiDpi", "Win32_Graphics_Gdi", "Win32_Security_Credentials"] }

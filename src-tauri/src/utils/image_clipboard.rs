@@ -969,6 +969,8 @@ impl ImageClipboardManager {
             .map(|(_, ext)| ext.as_str())
             .unwrap_or("webp");
         let image_path = image_blob_path(&id, blob_ext).to_string_lossy().to_string();
+        // 供同步广播使用（原值后续会被移走）
+        let sync_image_path = image_path.clone();
         let item = ImageHistoryItem {
             id: id.clone(),
             width,
@@ -1125,6 +1127,8 @@ impl ImageClipboardManager {
                     log::error!("增量写入新增图片项失败: {}", e);
                 } else {
                     log::debug!("新增图片项保存成功: item_id={}, position={}", id, position);
+                    // 手机同步：新图片入库后广播（同步服务未启动时为 no-op）
+                    crate::features::sync::broadcast_image(&sync_image_path, width, height);
                 }
             } else {
                 log::warn!("未能定位新增图片项的持久化快照: item_id={}", id);

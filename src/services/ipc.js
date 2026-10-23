@@ -160,6 +160,13 @@ export const IPC_COMMANDS = {
     SET_SCREENSHOT_WINDOW_VISIBLE: 'set_screenshot_window_visible',
     SET_SCREENSHOT_CLIPBOARD_LINK_ONCE: 'set_screenshot_clipboard_link_once',
     CHOOSE_SCREENSHOT_SAVE_PATH: 'choose_screenshot_save_path',
+
+    // 手机同步
+    START_SYNC: 'start_sync',
+    STOP_SYNC: 'stop_sync',
+    GET_SYNC_STATUS: 'get_sync_status',
+    REGENERATE_SYNC_PAIRING_CODE: 'regenerate_sync_pairing_code',
+    UNPAIR_SYNC_DEVICE: 'unpair_sync_device',
     SAVE_SCREENSHOT_TO_PATH: 'save_screenshot_to_path',
     EXPORT_SCREENSHOT_TO_PATH: 'export_screenshot_to_path',
     COPY_SCREENSHOT_TO_CLIPBOARD: 'copy_screenshot_to_clipboard',
@@ -650,6 +657,14 @@ export const ScreenshotService = {
     finishManualLongshot: (sessionId) => ipcInvoke(IPC_COMMANDS.FINISH_MANUAL_LONGSHOT, {request: {sessionId}}),
     getManualLongshotStatus: (sessionId) => ipcInvoke(IPC_COMMANDS.GET_MANUAL_LONGSHOT_STATUS, {request: {sessionId}}),
     getManualLongshotAvailability: () => ipcInvoke(IPC_COMMANDS.GET_MANUAL_LONGSHOT_AVAILABILITY),
+};
+
+export const SyncService = {
+    start: () => ipcInvoke(IPC_COMMANDS.START_SYNC),
+    stop: () => ipcInvoke(IPC_COMMANDS.STOP_SYNC),
+    getStatus: () => ipcInvoke(IPC_COMMANDS.GET_SYNC_STATUS),
+    regeneratePairingCode: () => ipcInvoke(IPC_COMMANDS.REGENERATE_SYNC_PAIRING_CODE),
+    unpairDevice: () => ipcInvoke(IPC_COMMANDS.UNPAIR_SYNC_DEVICE),
 };
 
 export const BackupService = {

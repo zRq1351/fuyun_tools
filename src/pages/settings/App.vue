@@ -152,6 +152,9 @@
               @toggle-logging="handleLoggingToggle"
             />
           </div>
+          <div v-else-if="activeTab === 'sync'">
+            <SyncSettings />
+          </div>
 
           <div v-else-if="isDevMode && activeTab === 'developer'">
             <DeveloperSettings />
@@ -214,6 +217,7 @@ import DocumentManagerSettings from './components/DocumentManagerSettings.vue'
 import AISettings from './components/AISettings.vue'
 import BackupSettings from './components/BackupSettings.vue'
 import DiagnosticSettings from './components/DiagnosticSettings.vue'
+import SyncSettings from './components/SyncSettings.vue'
 import AboutSettings from './components/AboutSettings.vue'
 import DeveloperSettings from '@dev/DeveloperSettings'
 import {useUpdater} from './composables/useUpdater'

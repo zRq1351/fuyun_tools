@@ -1,0 +1,326 @@
+//! 局域网剪贴板同步：PC 内嵌服务 + 手机 App 直连，无云、无服务器成本。
+//!
+//! 架构：
+//! 1. PC 启动同步服务 → mDNS 广播 `_fuyun._tcp`（手机自动发现）+ 生成 6 位配对码
+//! 2. 手机输入配对码 → `POST /api/pair` 换取设备令牌
+//! 3. 双向同步：
+//!    - 手机 → PC：`POST /api/clip`（文本/图片）写入 PC 剪贴板（带 `is_updating_clipboard` 防回环）
+//!    - PC → 手机：剪贴板新内容经 `broadcast_text` / `broadcast_image` 钩子推给 WS 连接
+//!
+//! 模块划分：pairing（纯配对逻辑）/ server（HTTP+WS）/ discovery（mDNS）/ commands（Tauri 命令）
+
+pub mod commands;
+pub mod discovery;
+pub mod pairing;
+pub mod server;
+
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, OnceLock};
+
+use serde::Serialize;
+use tauri::{AppHandle, Manager};
+use tokio::sync::{broadcast, oneshot};
+
+use crate::core::app_state::AppState as SharedAppState;
+use crate::sync::Mutex;
+
+/// 锁定本模块的普通（非 Arc）Mutex 字段
+pub(crate) fn lock<T>(m: &Mutex<T>) -> parking_lot::MutexGuard<'_, T> {
+    m.lock().unwrap_or_else(|never| match never {})
+}
+
+/// 默认同步端口（被占用时向后尝试）
+pub const SYNC_DEFAULT_PORT: u16 = 45817;
+/// 端口尝试次数
+const PORT_ATTEMPTS: u16 = 10;
+/// 内存中保留的最近同步条数（手机断线重连后按 since 拉取）
+const HISTORY_CAP: usize = 200;
+/// WS 广播频道容量
+const BROADCAST_CAPACITY: usize = 64;
+/// 同步服务协议版本（手机端兼容性判断）
+pub const SYNC_PROTOCOL_VERSION: &str = "1";
+
+/// 一条同步消息（文本或图片）
+#[derive(Clone, Debug, Serialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum SyncMessage {
+    Text {
+        text: String,
+    },
+    Image {
+        /// PC 侧图片文件绝对路径（手机经 /api/image 下载）
+        path: String,
+        width: u32,
+        height: u32,
+    },
+}
+
+/// 带序号的历史条目（序号即时间戳毫秒，手机按 since 增量拉取）
+#[derive(Clone, Debug, Serialize)]
+pub struct HistoryItem {
+    pub id: i64,
+    #[serde(flatten)]
+    pub message: SyncMessage,
+}
+
+/// 同步服务共享状态（进程级单例）
+pub struct SyncState {
+    running: AtomicBool,
+    port: Mutex<u16>,
+    pairing_code: Mutex<Option<pairing::PairingCode>>,
+    token: Mutex<Option<String>>,
+    tx: broadcast::Sender<SyncMessage>,
+    history: Mutex<Vec<HistoryItem>>,
+    shutdown_tx: Mutex<Option<oneshot::Sender<()>>>,
+    last_error: Mutex<Option<String>>,
+    pc_name: String,
+}
+
+static SYNC: OnceLock<Arc<SyncState>> = OnceLock::new();
+
+fn shared() -> &'static Arc<SyncState> {
+    SYNC.get_or_init(|| {
+        let (tx, _rx) = broadcast::channel(BROADCAST_CAPACITY);
+        Arc::new(SyncState {
+            running: AtomicBool::new(false),
+            port: Mutex::new(SYNC_DEFAULT_PORT),
+            pairing_code: Mutex::new(None),
+            token: Mutex::new(None),
+            tx,
+            history: Mutex::new(Vec::new()),
+            shutdown_tx: Mutex::new(None),
+            last_error: Mutex::new(None),
+            pc_name: detect_pc_name(),
+        })
+    })
+}
+
+/// 电脑名称（优先 Windows 环境变量，回退固定值）
+fn detect_pc_name() -> String {
+    std::env::var("COMPUTERNAME")
+        .or_else(|_| std::env::var("HOSTNAME"))
+        .ok()
+        .filter(|s| !s.trim().is_empty())
+        .map(|s| s.trim().to_string())
+        .unwrap_or_else(|| "我的电脑".to_string())
+}
+
+/// 推入一条历史并广播（服务未启动时为 no-op，钩子调用零成本）
+fn push_and_broadcast(msg: SyncMessage) {
+    let state = shared();
+    if !state.running.load(Ordering::SeqCst) {
+        return;
+    }
+    let id = pairing::now_ms();
+    {
+        let mut history = lock(&state.history);
+        history.insert(
+            0,
+            HistoryItem {
+                id,
+                message: msg.clone(),
+            },
+        );
+        history.truncate(HISTORY_CAP);
+    }
+    let _ = state.tx.send(msg);
+}
+
+/// 钩子：新剪贴板文本（由 clipboard_manager 入库成功后调用）
+pub fn broadcast_text(text: &str) {
+    if text.is_empty() {
+        return;
+    }
+    push_and_broadcast(SyncMessage::Text {
+        text: text.to_string(),
+    });
+}
+
+/// 钩子：新剪贴板图片（由 image_clipboard 入库成功后调用）
+pub fn broadcast_image(path: &str, width: u32, height: u32) {
+    if path.is_empty() {
+        return;
+    }
+    push_and_broadcast(SyncMessage::Image {
+        path: path.to_string(),
+        width,
+        height,
+    });
+}
+
+/// 启动同步服务。返回状态快照；已在运行则直接返回当前状态。
+pub fn start(app: &AppHandle, app_state: Arc<Mutex<SharedAppState>>) -> Result<SyncStatus, String> {
+    let state = shared();
+    if state.running.load(Ordering::SeqCst) {
+        return Ok(status_snapshot(state));
+    }
+
+    // 1. 绑定端口（默认端口被占用则向后尝试）
+    let listener = {
+        let mut last_err = None;
+        let mut bound = None;
+        for offset in 0..PORT_ATTEMPTS {
+            let port = SYNC_DEFAULT_PORT + offset;
+            match std::net::TcpListener::bind(("0.0.0.0", port)) {
+                Ok(l) => {
+                    bound = Some((l, port));
+                    break;
+                }
+                Err(e) => last_err = Some(e),
+            }
+        }
+        match bound {
+            Some(v) => v,
+            None => {
+                return Err(format!(
+                    "无法绑定同步端口 {}-{}: {}",
+                    SYNC_DEFAULT_PORT,
+                    SYNC_DEFAULT_PORT + PORT_ATTEMPTS - 1,
+                    last_err
+                        .map(|e| e.to_string())
+                        .unwrap_or_else(|| "未知错误".to_string())
+                ))
+            }
+        }
+    };
+    let (std_listener, port) = listener;
+    std_listener
+        .set_nonblocking(true)
+        .map_err(|e| e.to_string())?;
+    *lock(&state.port) = port;
+
+    // 2. 令牌：从磁盘恢复或新建
+    let token = load_or_create_token(app)?;
+    *lock(&state.token) = Some(token);
+
+    // 3. 生成配对码
+    *lock(&state.pairing_code) = Some(pairing::generate_pairing_code());
+    *lock(&state.last_error) = None;
+
+    // 4. mDNS 广播（失败不阻断服务，手机仍可手动输 IP）
+    let mdns = discovery::advertise(port, &state.pc_name);
+    if mdns.is_none() {
+        log::warn!("mDNS 广播启动失败，手机可通过手动输入 IP 连接");
+    }
+
+    // 5. 启动 HTTP/WS 服务
+    let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
+    let tokio_listener =
+        tokio::net::TcpListener::from_std(std_listener).map_err(|e| e.to_string())?;
+    let router = server::router(Arc::clone(state), app.clone(), app_state);
+    tauri::async_runtime::spawn(async move {
+        let server = axum::serve(tokio_listener, router).with_graceful_shutdown(async {
+            let _ = shutdown_rx.await;
+        });
+        if let Err(e) = server.await {
+            log::error!("同步服务退出: {}", e);
+        }
+        // mdns 守护对象随本 future 结束而释放，自动注销广播
+        drop(mdns);
+    });
+    *lock(&state.shutdown_tx) = Some(shutdown_tx);
+
+    state.running.store(true, Ordering::SeqCst);
+    log::info!("同步服务已启动: port={}, name={}", port, state.pc_name);
+    Ok(status_snapshot(state))
+}
+
+/// 停止同步服务
+pub fn stop() {
+    let state = shared();
+    if !state.running.load(Ordering::SeqCst) {
+        return;
+    }
+    if let Some(tx) = lock(&state.shutdown_tx).take() {
+        let _ = tx.send(());
+    }
+    *lock(&state.pairing_code) = None;
+    state.running.store(false, Ordering::SeqCst);
+    log::info!("同步服务已停止");
+}
+
+/// 吊销当前令牌并生成新配对码（手机需重新配对）
+pub fn unpair(app: &AppHandle) -> Result<(), String> {
+    let state = shared();
+    *lock(&state.token) = None;
+    let path = token_file_path(app)?;
+    if path.exists() {
+        std::fs::remove_file(&path).map_err(|e| format!("删除同步令牌文件失败: {}", e))?;
+    }
+    *lock(&state.pairing_code) = Some(pairing::generate_pairing_code());
+    log::info!("同步设备已吊销，等待重新配对");
+    Ok(())
+}
+
+/// 重新生成配对码
+pub fn regenerate_pairing_code() -> String {
+    let state = shared();
+    let code = pairing::generate_pairing_code();
+    *lock(&state.pairing_code) = Some(pairing::PairingCode {
+        code: code.code.clone(),
+        expires_at_ms: code.expires_at_ms,
+    });
+    code.code
+}
+
+/// 状态快照（给 FE 面板和命令层）
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SyncStatus {
+    pub running: bool,
+    pub port: u16,
+    /// 本机局域网 IP（手机手动连接用）
+    pub local_ip: Option<String>,
+    pub pc_name: String,
+    pub paired: bool,
+    pub pairing_code: Option<String>,
+    pub pairing_expires_in_secs: i64,
+    pub protocol_version: &'static str,
+    pub last_error: Option<String>,
+}
+
+pub fn status() -> SyncStatus {
+    status_snapshot(shared())
+}
+
+fn status_snapshot(state: &SyncState) -> SyncStatus {
+    let now = pairing::now_ms();
+    let code = lock(&state.pairing_code);
+    SyncStatus {
+        running: state.running.load(Ordering::SeqCst),
+        port: *lock(&state.port),
+        local_ip: discovery::lan_ip().map(|ip| ip.to_string()),
+        pc_name: state.pc_name.clone(),
+        paired: lock(&state.token).is_some(),
+        pairing_code: code.as_ref().map(|c| c.code.clone()),
+        pairing_expires_in_secs: code.as_ref().map(|c| c.remaining_secs(now)).unwrap_or(0),
+        protocol_version: SYNC_PROTOCOL_VERSION,
+        last_error: lock(&state.last_error).clone(),
+    }
+}
+
+// ---------- 令牌持久化 ----------
+
+fn token_file_path(app: &AppHandle) -> Result<std::path::PathBuf, String> {
+    let dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("获取应用数据目录失败: {}", e))?;
+    std::fs::create_dir_all(&dir).map_err(|e| format!("创建应用数据目录失败: {}", e))?;
+    Ok(dir.join("sync_token.txt"))
+}
+
+fn load_or_create_token(app: &AppHandle) -> Result<String, String> {
+    let path = token_file_path(app)?;
+    if let Ok(existing) = std::fs::read_to_string(&path) {
+        let trimmed = existing.trim();
+        if !trimmed.is_empty() {
+            log::info!("同步令牌已从磁盘恢复");
+            return Ok(trimmed.to_string());
+        }
+    }
+    let token = pairing::generate_token();
+    std::fs::write(&path, &token).map_err(|e| format!("保存同步令牌失败: {}", e))?;
+    log::info!("同步令牌已生成并保存");
+    Ok(token)
+}

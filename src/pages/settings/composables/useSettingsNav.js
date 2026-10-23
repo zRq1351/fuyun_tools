@@ -2,6 +2,7 @@ import {computed, ref} from 'vue'
 import {useI18n} from 'vue-i18n'
 import {
     Camera,
+    Connection,
     Cpu,
     DocumentCopy,
     Folder,
@@ -81,6 +82,12 @@ export function useSettingsNav() {
                 label: t('settings.nav.diagnostic'),
                 description: t('settings.nav.diagnosticDesc'),
                 icon: WarningFilled
+            },
+            {
+                key: 'sync',
+                label: t('settings.nav.sync'),
+                description: t('settings.nav.syncDesc'),
+                icon: Connection
             }
         ]
         if (isDevMode) {

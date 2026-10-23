@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  同步服务仅用于局域网（http://IP:端口），必须允许明文流量。
+  若未来接入公网服务，请移除 cleartextTrafficPermitted 并改用 HTTPS。
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>

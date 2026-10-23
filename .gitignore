@@ -30,3 +30,11 @@ src-tauri/target/
 /tasks/
 /.mimocode/
 /.workbuddy/
+
+# Android build output
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+android/.idea/
+android/gradle/wrapper/gradle-wrapper.jar

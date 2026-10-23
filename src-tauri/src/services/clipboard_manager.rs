@@ -118,6 +118,8 @@ pub fn add_to_clipboard_history(
 
     let payload = {
         let manager = lock_arc_mutex(&manager_arc);
+        // 手机同步：新剪贴板文本广播给已配对设备（同步服务未启动时为 no-op）
+        crate::features::sync::broadcast_text(&content);
         manager.add_to_history(content);
 
         if !should_emit {

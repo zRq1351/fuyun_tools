@@ -7,6 +7,9 @@ pub mod utils;
 
 use crate::core::app_state::AppState;
 use crate::core::error::install_global_panic_hook;
+use crate::features::sync::commands::{
+    get_sync_status, regenerate_sync_pairing_code, start_sync, stop_sync, unpair_sync_device,
+};
 use crate::services::ai_services::{
     stream_custom_prompt_text, stream_explain_text, stream_translate_text,
 };
@@ -720,6 +723,11 @@ pub fn run() {
             open_recording_folder,
             run_recording_regression,
             show_recording_toolbar,
+            start_sync,
+            stop_sync,
+            get_sync_status,
+            regenerate_sync_pairing_code,
+            unpair_sync_device,
             resize_recording_toolbar,
             check_recording_ffmpeg,
             download_recording_ffmpeg,
