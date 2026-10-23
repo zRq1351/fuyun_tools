@@ -11,25 +11,21 @@ use crate::services::ai_services::invalidate_ai_client_cache;
 use crate::services::clipboard_manager::set_clipboard_listener_enabled;
 use crate::services::image_clipboard_manager::set_image_clipboard_listener_enabled;
 use crate::sync::{lock_arc_mutex, Mutex};
+use crate::ui::commands::{register_mic_toggle_shortcut, register_recording_shortcut};
 use crate::ui::commands_clipboard::*;
 use crate::ui::commands_recording::toggle_microphone_from_shortcut;
 use crate::ui::commands_screenshot::close_screenshot_window;
-use crate::ui::window_manager::{
-    destroy_window_by_label, ensure_window_for_label,
-};
+use crate::ui::window_manager::{destroy_window_by_label, ensure_window_for_label};
 use crate::utils::image_clipboard::set_image_fill_verify_mode;
 use crate::utils::utils_helpers::{
-    default_explanation_prompt_template, default_translation_prompt_template,
-    save_settings,
+    default_explanation_prompt_template, default_translation_prompt_template, save_settings,
 };
 use std::sync::Arc;
 use std::sync::OnceLock;
 use tauri::{AppHandle, Manager, State};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
-use crate::ui::commands::{register_recording_shortcut, register_mic_toggle_shortcut};
 
 static SETTINGS_SAVE_MUTEX: OnceLock<tauri::async_runtime::Mutex<()>> = OnceLock::new();
-
 
 #[tauri::command]
 pub async fn get_ai_settings(
@@ -1455,3 +1451,26 @@ pub async fn get_all_configured_providers() -> Result<Vec<(String, String)>, Str
     Ok(providers.into_keys().map(|k| (k.clone(), k)).collect())
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_effective_key_uses_new_value() {
+        assert_eq!(
+            effective_key(&Some("Ctrl+K".to_string()), "Alt+R"),
+            "Ctrl+K"
+        );
+    }
+
+    #[test]
+    fn test_effective_key_falls_back_when_none() {
+        assert_eq!(effective_key(&None, "Alt+R"), "Alt+R");
+    }
+
+    #[test]
+    fn test_effective_key_empty_string_kept() {
+        // Some("") 应返回空串（调用方自行处理），验证不 panic
+        assert_eq!(effective_key(&Some(String::new()), "fallback"), "");
+    }
+}

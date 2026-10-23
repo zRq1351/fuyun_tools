@@ -1,6 +1,6 @@
 use super::db_utils::{build_fts_query_space, create_db_options};
-use crate::utils::document_database_schema::{ensure_docs_db_schema, is_fts_enabled};
 use crate::core::error_codes::AppErrorKind;
+use crate::utils::document_database_schema::{ensure_docs_db_schema, is_fts_enabled};
 use serde::{Deserialize, Serialize};
 use sqlx::sqlite::{SqlitePool, SqlitePoolOptions};
 use sqlx::{Acquire, Row, Sqlite, SqliteConnection};

@@ -24,10 +24,7 @@ use crate::utils::image_clipboard::get_image_persist_queue_metrics_snapshot;
 use crate::utils::image_clipboard::set_image_fill_verify_mode;
 #[cfg(debug_assertions)]
 use crate::utils::utils_helpers::get_dedup_scan_metrics;
-use crate::utils::utils_helpers::{
-    load_settings,
-    save_settings,
-};
+use crate::utils::utils_helpers::{load_settings, save_settings};
 use std::collections::HashSet;
 use std::fs;
 use std::path::PathBuf;
@@ -1157,28 +1154,4 @@ pub async fn set_locale(locale: String) -> Result<(), String> {
 #[tauri::command]
 pub async fn notify_result_window_ready(_window_label: String) -> Result<(), String> {
     Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_effective_key_uses_new_value() {
-        assert_eq!(
-            effective_key(&Some("Ctrl+K".to_string()), "Alt+R"),
-            "Ctrl+K"
-        );
-    }
-
-    #[test]
-    fn test_effective_key_falls_back_when_none() {
-        assert_eq!(effective_key(&None, "Alt+R"), "Alt+R");
-    }
-
-    #[test]
-    fn test_effective_key_empty_string_kept() {
-        // Some("") 应返回空串（调用方自行处理），验证不 panic
-        assert_eq!(effective_key(&Some(String::new()), "fallback"), "");
-    }
 }

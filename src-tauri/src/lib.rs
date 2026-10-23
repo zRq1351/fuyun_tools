@@ -16,7 +16,6 @@ use crate::services::image_clipboard_manager::{
 };
 use crate::sync::{lock_arc_mutex, Mutex};
 use crate::ui::commands::*;
-use crate::ui::commands_settings::*;
 use crate::ui::commands_backup::*;
 use crate::ui::commands_clipboard::*;
 use crate::ui::commands_diagnostic::*;
@@ -38,6 +37,7 @@ use crate::ui::commands_recording::{
     toggle_recording_from_shortcut, update_recording_audio_capture,
 };
 use crate::ui::commands_screenshot::*;
+use crate::ui::commands_settings::*;
 use crate::ui::commands_vc_runtime::*;
 use crate::ui::tray_menu::rebuild_tray_menu;
 use crate::ui::window_manager::{
