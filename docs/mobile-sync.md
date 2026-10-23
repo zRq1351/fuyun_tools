@@ -22,7 +22,7 @@
 
 ## 手机端使用
 
-1. 安装同级目录 `fuyun_clipboard/`（`D:\workspace\fuyun_clipboard`）下的「浮云剪贴板」App（见下方构建说明）
+1. 安装同级目录 `fuyun_tools_m/`（`D:\workspace\fuyun_tools_m`）下的「浮云剪贴板」App（见下方构建说明）
 2. 首次打开：
    - 在「发现的电脑」列表点选你的电脑（或手动输入地址）
    - 输入电脑上的 6 位配对码 → 点「配对」
@@ -54,9 +54,9 @@
 环境要求：Android Studio（Ladybug 或更新）、JDK 17。
 
 ```bash
-# 方式一：Android Studio 直接打开 fuyun_clipboard/ 目录（首次打开会自动生成 Gradle Wrapper）
+# 方式一：Android Studio 直接打开 fuyun_tools_m/ 目录（首次打开会自动生成 Gradle Wrapper）
 # 方式二：命令行（需本机已安装 Gradle 8.9+）
-cd ../fuyun_clipboard
+cd ../fuyun_tools_m
 gradle wrapper          # 首次生成 gradlew（已有脚本，仅缺 wrapper jar）
 ./gradlew assembleDebug # 产出 app/build/outputs/apk/debug/app-debug.apk
 ```
