@@ -1,112 +1,112 @@
 <template>
   <div
-      class="viewer-root"
-      @click="requestClose"
+    class="viewer-root"
+    @click="requestClose"
   >
     <div
-        class="viewer-drag-strip"
-        data-tauri-drag-region
-        @click.stop
+      class="viewer-drag-strip"
+      data-tauri-drag-region
+      @click.stop
     />
     <div
-        class="viewer-topbar"
-        @click.stop
+      class="viewer-topbar"
+      @click.stop
     >
       <div
-          class="viewer-drag-icon"
-          data-tauri-drag-region
-          :title="t('textPreview.dragWindow')"
-          @mousedown.left.stop.prevent="startWindowDrag"
+        class="viewer-drag-icon"
+        data-tauri-drag-region
+        :title="t('textPreview.dragWindow')"
+        @mousedown.left.stop.prevent="startWindowDrag"
       >
         <GripHorizontal
-            :size="16"
-            :stroke-width="2"
+          :size="16"
+          :stroke-width="2"
         />
       </div>
       <div
-          v-if="displayLabel"
-          class="viewer-pos"
-          title="序号"
+        v-if="displayLabel"
+        class="viewer-pos"
+        title="序号"
       >
         {{ displayLabel }}
       </div>
       <template v-if="!isEditing">
         <button
-            class="viewer-action-btn"
-            @mousedown.left.stop.prevent
-            @click.stop="startEdit"
+          class="viewer-action-btn"
+          @mousedown.left.stop.prevent
+          @click.stop="startEdit"
         >
           {{
             t('textPreview.edit')
           }}
         </button>
         <button
-            class="viewer-action-btn"
-            @mousedown.left.stop.prevent
-            @click.stop="requestClose"
+          class="viewer-action-btn"
+          @mousedown.left.stop.prevent
+          @click.stop="requestClose"
         >
           {{ t('textPreview.close') }}
         </button>
       </template>
       <template v-else>
         <button
-            class="viewer-action-btn primary"
-            @mousedown.left.stop.prevent
-            @click.stop="saveEdit"
+          class="viewer-action-btn primary"
+          @mousedown.left.stop.prevent
+          @click.stop="saveEdit"
         >
           {{ t('textPreview.save') }}
         </button>
         <button
-            class="viewer-action-btn"
-            @mousedown.left.stop.prevent
-            @click.stop="cancelEdit"
+          class="viewer-action-btn"
+          @mousedown.left.stop.prevent
+          @click.stop="cancelEdit"
         >
           {{ t('textPreview.cancel') }}
         </button>
       </template>
     </div>
     <div
-        :class="['viewer-card', animationState]"
-        @click.stop
+      :class="['viewer-card', animationState]"
+      @click.stop
     >
       <div class="preview-content">
         <textarea
-            v-if="isEditing"
-            ref="textareaRef"
-            v-model="editableText"
-            class="edit-textarea"
-            spellcheck="false"
+          v-if="isEditing"
+          ref="textareaRef"
+          v-model="editableText"
+          class="edit-textarea"
+          spellcheck="false"
         />
         <FormattedContent
-            v-else
-            :content="textContent"
+          v-else
+          :content="textContent"
         />
       </div>
     </div>
     <button
-        v-if="hasPrev && !isEditing"
-        class="viewer-nav viewer-nav-prev"
-        type="button"
-        title="上一张"
-        @mousedown.left.stop.prevent
-        @click.stop.prevent="goBy(-1)"
+      v-if="hasPrev && !isEditing"
+      class="viewer-nav viewer-nav-prev"
+      type="button"
+      title="上一张"
+      @mousedown.left.stop.prevent
+      @click.stop.prevent="goBy(-1)"
     >
       <ChevronLeft
-          :size="22"
-          :stroke-width="2"
+        :size="22"
+        :stroke-width="2"
       />
     </button>
     <button
-        v-if="hasNext && !isEditing"
-        class="viewer-nav viewer-nav-next"
-        type="button"
-        title="下一张"
-        @mousedown.left.stop.prevent
-        @click.stop.prevent="goBy(1)"
+      v-if="hasNext && !isEditing"
+      class="viewer-nav viewer-nav-next"
+      type="button"
+      title="下一张"
+      @mousedown.left.stop.prevent
+      @click.stop.prevent="goBy(1)"
     >
       <ChevronRight
-          :size="22"
-          :stroke-width="2"
+        :size="22"
+        :stroke-width="2"
       />
     </button>
   </div>

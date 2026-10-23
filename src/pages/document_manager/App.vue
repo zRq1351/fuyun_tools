@@ -1,9 +1,9 @@
 <template>
   <div
-      class="doc-manager"
-      @dragover.prevent="dragover = true"
-      @dragleave.prevent="dragover = false"
-      @drop.prevent="handleDrop"
+    class="doc-manager"
+    @dragover.prevent="dragover = true"
+    @dragleave.prevent="dragover = false"
+    @drop.prevent="handleDrop"
   >
     <div class="dm-layout">
       <div class="dm-sidebar">
@@ -18,31 +18,31 @@
           </div>
         </div>
         <div
-            v-if="orphanCount > 0"
-            class="dm-orphan-banner"
-            role="button"
-            tabindex="0"
-            @click="showOrphanDialog = true"
-            @keydown.enter.prevent="showOrphanDialog = true"
-            @keydown.space.prevent="showOrphanDialog = true"
+          v-if="orphanCount > 0"
+          class="dm-orphan-banner"
+          role="button"
+          tabindex="0"
+          @click="showOrphanDialog = true"
+          @keydown.enter.prevent="showOrphanDialog = true"
+          @keydown.space.prevent="showOrphanDialog = true"
         >
           <span class="dm-orphan-badge">{{ orphanCount }}</span>
           <span>个未管理文件</span>
           <el-icon :size="12">
-            <ArrowRight/>
+            <ArrowRight />
           </el-icon>
         </div>
         <div
-            v-else-if="!orphanChecked"
-            class="dm-orphan-banner dm-orphan-banner--hint"
-            role="button"
-            tabindex="0"
-            @click="detectOrphans"
-            @keydown.enter.prevent="detectOrphans"
-            @keydown.space.prevent="detectOrphans"
+          v-else-if="!orphanChecked"
+          class="dm-orphan-banner dm-orphan-banner--hint"
+          role="button"
+          tabindex="0"
+          @click="detectOrphans"
+          @keydown.enter.prevent="detectOrphans"
+          @keydown.space.prevent="detectOrphans"
         >
           <el-icon :size="14">
-            <Search/>
+            <Search />
           </el-icon>
           <span>{{ t('documentManager.detectOrphan') }}</span>
         </div>
@@ -50,46 +50,46 @@
           <div class="dm-section-title">
             <span>{{ t('documentManager.rootDir') }}</span>
             <el-button
-                size="small"
-                text
-                @click="showAddRoot = true"
+              size="small"
+              text
+              @click="showAddRoot = true"
             >
               <el-icon>
-                <Plus/>
+                <Plus />
               </el-icon>
             </el-button>
           </div>
           <div
-              ref="rootListRef"
-              class="dm-root-list"
+            ref="rootListRef"
+            class="dm-root-list"
           >
             <div
-                v-for="root in roots"
-                :key="root.id"
-                :class="{ active: rootFilter === root.id }"
-                :data-root-id="root.id"
-                class="dm-root-item sortable-root"
-                role="button"
-                tabindex="0"
-                @click="selectRoot(root, $event)"
-                @keydown.enter.prevent="selectRoot(root, $event)"
-                @keydown.space.prevent="selectRoot(root, $event)"
+              v-for="root in roots"
+              :key="root.id"
+              :class="{ active: rootFilter === root.id }"
+              :data-root-id="root.id"
+              class="dm-root-item sortable-root"
+              role="button"
+              tabindex="0"
+              @click="selectRoot(root, $event)"
+              @keydown.enter.prevent="selectRoot(root, $event)"
+              @keydown.space.prevent="selectRoot(root, $event)"
             >
               <el-icon>
-                <Folder/>
+                <Folder />
               </el-icon>
               <span class="dm-root-name">{{ root.name }}</span>
               <el-dropdown trigger="click">
                 <span class="dm-cat-more">
                   <el-icon>
-                    <MoreFilled/>
+                    <MoreFilled />
                   </el-icon>
                 </span>
                 <template #dropdown>
                   <el-dropdown-menu>
                     <el-dropdown-item
-                        style="color: var(--el-color-danger)"
-                        @click="removeRootFn(root.id)"
+                      style="color: var(--el-color-danger)"
+                      @click="removeRootFn(root.id)"
                     >
                       {{ t('common.delete') }}
                     </el-dropdown-item>
@@ -103,67 +103,67 @@
           <div class="dm-section-title">
             <span>{{ t('documentManager.categories') }}</span>
             <el-button
-                :disabled="rootFilter === null"
-                size="small"
-                text
-                @click="showAddCategory = true"
+              :disabled="rootFilter === null"
+              size="small"
+              text
+              @click="showAddCategory = true"
             >
               <el-icon>
-                <Plus/>
+                <Plus />
               </el-icon>
             </el-button>
           </div>
           <div class="dm-category-list">
             <div
-                v-if="rootFilter !== null"
-                :class="{ active: categoryFilter === null }"
-                class="dm-category-item dm-cat-all"
-                role="button"
-                tabindex="0"
-                @click="categoryFilter = null"
-                @keydown.enter.prevent="categoryFilter = null"
-                @keydown.space.prevent="categoryFilter = null"
+              v-if="rootFilter !== null"
+              :class="{ active: categoryFilter === null }"
+              class="dm-category-item dm-cat-all"
+              role="button"
+              tabindex="0"
+              @click="categoryFilter = null"
+              @keydown.enter.prevent="categoryFilter = null"
+              @keydown.space.prevent="categoryFilter = null"
             >
               <el-icon>
-                <Document/>
+                <Document />
               </el-icon>
               <span class="dm-root-name">{{ t('documentManager.all') }}</span>
               <span
-                  v-if="stats?.totalFiles"
-                  class="dm-cat-count"
+                v-if="stats?.totalFiles"
+                class="dm-cat-count"
               >{{ stats.totalFiles }}</span>
               <el-icon class="dm-dots-spacer">
-                <MoreFilled/>
+                <MoreFilled />
               </el-icon>
             </div>
             <div
-                ref="catListRef"
-                class="dm-sort-list"
+              ref="catListRef"
+              class="dm-sort-list"
             >
               <div
-                  v-for="cat in visibleCategories"
-                  :key="cat.id"
-                  :class="{ active: categoryFilter === cat.id }"
-                  :data-cat-id="cat.id"
-                  class="dm-category-item sortable-category"
-                  role="button"
-                  tabindex="0"
-                  @click="selectCategory(cat, $event)"
-                  @keydown.enter.prevent="selectCategory(cat, $event)"
-                  @keydown.space.prevent="selectCategory(cat, $event)"
+                v-for="cat in visibleCategories"
+                :key="cat.id"
+                :class="{ active: categoryFilter === cat.id }"
+                :data-cat-id="cat.id"
+                class="dm-category-item sortable-category"
+                role="button"
+                tabindex="0"
+                @click="selectCategory(cat, $event)"
+                @keydown.enter.prevent="selectCategory(cat, $event)"
+                @keydown.space.prevent="selectCategory(cat, $event)"
               >
                 <el-icon :style="{ color: cat.color }">
-                  <component :is="getCatIcon(cat.icon)"/>
+                  <component :is="getCatIcon(cat.icon)" />
                 </el-icon>
                 <span class="dm-root-name">{{ cat.name }}</span>
                 <span
-                    v-if="(catCountMap.get(cat.id) || 0) > 0"
-                    class="dm-cat-count"
+                  v-if="(catCountMap.get(cat.id) || 0) > 0"
+                  class="dm-cat-count"
                 >{{ catCountMap.get(cat.id) || 0 }}</span>
                 <el-dropdown trigger="click">
                   <span class="dm-cat-more">
                     <el-icon>
-                      <MoreFilled/>
+                      <MoreFilled />
                     </el-icon>
                   </span>
                   <template #dropdown>
@@ -174,8 +174,8 @@
                         }}
                       </el-dropdown-item>
                       <el-dropdown-item
-                          style="color: var(--el-color-danger)"
-                          @click="removeCategoryFn(cat.id)"
+                        style="color: var(--el-color-danger)"
+                        @click="removeCategoryFn(cat.id)"
                       >
                         {{ t('common.delete') }}
                       </el-dropdown-item>
@@ -185,34 +185,34 @@
               </div>
             </div>
             <div
-                v-if="rootFilter !== null && categories && categories.length > 0"
-                :class="{ active: categoryFilter === -1 }"
-                class="dm-category-item dm-cat-uncat"
-                role="button"
-                tabindex="0"
-                @click="categoryFilter = categoryFilter === -1 ? null : -1"
-                @keydown.enter.prevent="categoryFilter = categoryFilter === -1 ? null : -1"
-                @keydown.space.prevent="categoryFilter = categoryFilter === -1 ? null : -1"
+              v-if="rootFilter !== null && categories && categories.length > 0"
+              :class="{ active: categoryFilter === -1 }"
+              class="dm-category-item dm-cat-uncat"
+              role="button"
+              tabindex="0"
+              @click="categoryFilter = categoryFilter === -1 ? null : -1"
+              @keydown.enter.prevent="categoryFilter = categoryFilter === -1 ? null : -1"
+              @keydown.space.prevent="categoryFilter = categoryFilter === -1 ? null : -1"
             >
               <el-icon>
-                <Folder/>
+                <Folder />
               </el-icon>
               <span class="dm-root-name">{{ t('documentManager.uncategorized') }}</span>
               <span
-                  v-if="uncatCount > 0"
-                  class="dm-cat-count"
+                v-if="uncatCount > 0"
+                class="dm-cat-count"
               >{{ uncatCount }}</span>
               <el-icon class="dm-dots-spacer">
-                <MoreFilled/>
+                <MoreFilled />
               </el-icon>
             </div>
             <div
-                v-if="!visibleCategories || visibleCategories.length === 0"
-                class="dm-category-item dm-cat-empty"
+              v-if="!visibleCategories || visibleCategories.length === 0"
+              class="dm-category-item dm-cat-empty"
             >
               <span>{{
-                  rootFilter === null ? t('documentManager.selectRootDir') : t('documentManager.noCategories')
-                }}</span>
+                rootFilter === null ? t('documentManager.selectRootDir') : t('documentManager.noCategories')
+              }}</span>
             </div>
           </div>
         </div>
@@ -222,14 +222,14 @@
         <div class="dm-toolbar">
           <div class="dm-tabs">
             <button
-                :class="['dm-tab', { active: activeTab === 'files' }]"
-                @click="activeTab = 'files'"
+              :class="['dm-tab', { active: activeTab === 'files' }]"
+              @click="activeTab = 'files'"
             >
               {{ t('documentManager.documents') }}
             </button>
             <button
-                :class="['dm-tab', { active: activeTab === 'history' }]"
-                @click="activeTab = 'history'; loadImportHistory()"
+              :class="['dm-tab', { active: activeTab === 'history' }]"
+              @click="activeTab = 'history'; loadImportHistory()"
             >
               {{ t('documentManager.history') }}
             </button>
@@ -237,84 +237,104 @@
           <template v-if="activeTab === 'files'">
             <div class="dm-search">
               <el-input
-                  v-model="searchKeyword"
-                  :placeholder="t('documentManager.searchPlaceholder')"
-                  clearable
-                  @clear="searchFiles"
+                v-model="searchKeyword"
+                :placeholder="t('documentManager.searchPlaceholder')"
+                clearable
+                @clear="searchFiles"
               >
                 <template #prefix>
                   <el-icon>
-                    <Search/>
+                    <Search />
                   </el-icon>
                 </template>
               </el-input>
               <el-select
-                  v-model="fileExtFilter"
-                  :placeholder="t('documentManager.allTypes')"
-                  clearable
-                  size="small"
-                  style="width:100px;margin-left:8px"
-                  @change="searchFiles"
+                v-model="fileExtFilter"
+                :placeholder="t('documentManager.allTypes')"
+                clearable
+                size="small"
+                style="width:100px;margin-left:8px"
+                @change="searchFiles"
               >
                 <el-option
-                    v-for="ext in commonExts"
-                    :key="ext.value"
-                    :label="ext.label"
-                    :value="ext.value"
+                  v-for="ext in commonExts"
+                  :key="ext.value"
+                  :label="ext.label"
+                  :value="ext.value"
                 />
               </el-select>
               <el-select
-                  v-model="tagFilter"
-                  :placeholder="t('documentManager.tagFilter')"
-                  clearable
-                  multiple
-                  size="small"
-                  style="width:160px;margin-left:8px"
-                  @change="searchFiles"
+                v-model="tagFilter"
+                :placeholder="t('documentManager.tagFilter')"
+                clearable
+                multiple
+                size="small"
+                style="width:160px;margin-left:8px"
+                @change="searchFiles"
               >
                 <el-option
-                    v-for="tg in allTags"
-                    :key="tg.tag"
-                    :label="`${tg.tag} (${tg.count})`"
-                    :value="tg.tag"
+                  v-for="tg in allTags"
+                  :key="tg.tag"
+                  :label="`${tg.tag} (${tg.count})`"
+                  :value="tg.tag"
                 />
               </el-select>
             </div>
             <div
-                v-if="multiSelectedIds.size > 0"
-                class="dm-batch-bar"
+              v-if="multiSelectedIds.size > 0"
+              class="dm-batch-bar"
             >
               <span>{{ t('documentManager.batchSelected', {n: multiSelectedIds.size}) }}</span>
-              <el-button size="small" @click="promptBatchTags('add')">{{ t('documentManager.batchAddTags') }}</el-button>
-              <el-button size="small" @click="promptBatchTags('remove')">{{ t('documentManager.batchRemoveTags') }}</el-button>
-              <el-button size="small" @click="promptBatchTags('replace')">{{ t('documentManager.batchReplaceTags') }}</el-button>
-              <el-button size="small" @click="multiSelectedIds.clear()">{{ t('documentManager.clearMultiSelect') }}</el-button>
+              <el-button
+                size="small"
+                @click="promptBatchTags('add')"
+              >
+                {{ t('documentManager.batchAddTags') }}
+              </el-button>
+              <el-button
+                size="small"
+                @click="promptBatchTags('remove')"
+              >
+                {{ t('documentManager.batchRemoveTags') }}
+              </el-button>
+              <el-button
+                size="small"
+                @click="promptBatchTags('replace')"
+              >
+                {{ t('documentManager.batchReplaceTags') }}
+              </el-button>
+              <el-button
+                size="small"
+                @click="multiSelectedIds.clear()"
+              >
+                {{ t('documentManager.clearMultiSelect') }}
+              </el-button>
             </div>
             <div class="dm-toolbar-actions">
               <el-button
-                  size="small"
-                  @click="openTagManager"
+                size="small"
+                @click="openTagManager"
               >
                 {{ t('documentManager.tagManager') }}
               </el-button>
               <el-button
-                  size="small"
-                  @click="rebuildFtsIndex"
+                size="small"
+                @click="rebuildFtsIndex"
               >
                 {{ t('documentManager.rebuildFts') }}
               </el-button>
               <el-button
-                  type="primary"
-                  @click="openImportDialog"
+                type="primary"
+                @click="openImportDialog"
               >
                 <el-icon>
-                  <Plus/>
+                  <Plus />
                 </el-icon>
                 {{ t('documentManager.addDocument') }}
               </el-button>
               <el-button @click="openScanDialog">
                 <el-icon>
-                  <Search/>
+                  <Search />
                 </el-icon>
                 {{ t('documentManager.scanFolder') }}
               </el-button>
@@ -324,83 +344,83 @@
 
         <template v-if="activeTab === 'files'">
           <div
-              v-if="items.length === 0 && !loading"
-              class="dm-empty"
+            v-if="items.length === 0 && !loading"
+            class="dm-empty"
           >
-            <el-empty :description="t('documentManager.noDocs')"/>
+            <el-empty :description="t('documentManager.noDocs')" />
           </div>
           <div
-              v-else-if="loading"
-              class="dm-empty"
+            v-else-if="loading"
+            class="dm-empty"
           >
             <el-icon
-                :size="32"
-                class="is-loading"
+              :size="32"
+              class="is-loading"
             >
-              <Loading/>
+              <Loading />
             </el-icon>
             <p style="margin-top:12px;color:var(--el-text-color-secondary)">
               {{ t('documentManager.loading') }}
             </p>
           </div>
           <div
-              v-else
-              ref="fileGridRef"
-              class="dm-file-grid"
-              @click.self="selectedId = null"
+            v-else
+            ref="fileGridRef"
+            class="dm-file-grid"
+            @click.self="selectedId = null"
           >
             <div
-                v-for="item in items"
-                :key="item.id"
-                :class="{ selected: selectedId === item.id || multiSelectedIds.has(item.id), 'ctx-anchor': ctxAnchorId === item.id }"
-                :data-file-id="item.id"
-                class="dm-file-card sortable-file"
-                role="button"
-                tabindex="0"
-                @click="onFileCardClick(item, $event)"
-                @keydown.enter.prevent="onFileCardClick(item, $event)"
-                @keydown.space.prevent="onFileCardClick(item, $event)"
-                @dblclick="openDocument(item)"
-                @contextmenu.prevent="showContextMenu($event, item)"
+              v-for="item in items"
+              :key="item.id"
+              :class="{ selected: selectedId === item.id || multiSelectedIds.has(item.id), 'ctx-anchor': ctxAnchorId === item.id }"
+              :data-file-id="item.id"
+              class="dm-file-card sortable-file"
+              role="button"
+              tabindex="0"
+              @click="onFileCardClick(item, $event)"
+              @keydown.enter.prevent="onFileCardClick(item, $event)"
+              @keydown.space.prevent="onFileCardClick(item, $event)"
+              @dblclick="openDocument(item)"
+              @contextmenu.prevent="showContextMenu($event, item)"
             >
               <span
-                  v-if="item.storageMode === 'repo'"
-                  class="dm-mode-badge repo"
+                v-if="item.storageMode === 'repo'"
+                class="dm-mode-badge repo"
               >{{
-                  t('documentManager.migrate')
-                }}</span>
+                t('documentManager.migrate')
+              }}</span>
               <span
-                  v-else
-                  class="dm-mode-badge index"
+                v-else
+                class="dm-mode-badge index"
               >{{ t('documentManager.index') }}</span>
               <div class="dm-file-icon">
                 <img
-                    v-if="fileIconCache[item.fileExt?.toLowerCase()]"
-                    :src="fileIconCache[item.fileExt?.toLowerCase()]"
-                    class="dm-file-icon-img"
+                  v-if="fileIconCache[item.fileExt?.toLowerCase()]"
+                  :src="fileIconCache[item.fileExt?.toLowerCase()]"
+                  class="dm-file-icon-img"
                 >
                 <el-icon
-                    v-else
-                    :color="getFileColor(item.fileExt)"
-                    :size="32"
+                  v-else
+                  :color="getFileColor(item.fileExt)"
+                  :size="32"
                 >
-                  <component :is="getFileIcon(item.fileExt)"/>
+                  <component :is="getFileIcon(item.fileExt)" />
                 </el-icon>
               </div>
               <div class="dm-file-info">
                 <div
-                    :title="item.title || item.fileName"
-                    class="dm-file-name"
+                  :title="item.title || item.fileName"
+                  class="dm-file-name"
                 >
                   {{ item.title || item.fileName }}
                 </div>
                 <div
-                    v-if="item.snippet"
-                    class="dm-file-snippet"
+                  v-if="item.snippet"
+                  class="dm-file-snippet"
                 >
                   <template
-                      v-for="(part, pi) in snippetParts(item.snippet, searchKeyword)"
-                      :key="pi"
+                    v-for="(part, pi) in snippetParts(item.snippet, searchKeyword)"
+                    :key="pi"
                   >
                     <span :class="{ 'dm-snippet-hit': part.hit }">{{ part.text }}</span>
                   </template>
@@ -413,30 +433,30 @@
             </div>
           </div>
           <div
-              v-if="total > pageLimit"
-              class="dm-pagination"
+            v-if="total > pageLimit"
+            class="dm-pagination"
           >
             <el-pagination
-                v-model:current-page="currentPage"
-                :page-size="pageLimit"
-                :total="total"
-                layout="prev,pager,next"
-                @current-change="loadFiles"
+              v-model:current-page="currentPage"
+              :page-size="pageLimit"
+              :total="total"
+              layout="prev,pager,next"
+              @current-change="loadFiles"
             />
           </div>
           <div
-              v-if="selectedId !== null && selectedDoc"
-              class="dm-detail-panel"
+            v-if="selectedId !== null && selectedDoc"
+            class="dm-detail-panel"
           >
             <div class="dm-detail-header">
               <span>{{ selectedDoc.title || selectedDoc.fileName }}</span>
               <el-button
-                  size="small"
-                  text
-                  @click="selectedId = null"
+                size="small"
+                text
+                @click="selectedId = null"
               >
                 <el-icon>
-                  <Close/>
+                  <Close />
                 </el-icon>
               </el-button>
             </div>
@@ -448,23 +468,23 @@
               </div>
               <div class="dm-detail-row">
                 <span
-                    class="dm-detail-label"
+                  class="dm-detail-label"
                 >{{
                   t('documentManager.size')
-                  }}</span><span>{{ formatFileSize(selectedDoc.fileSize) }}</span>
+                }}</span><span>{{ formatFileSize(selectedDoc.fileSize) }}</span>
               </div>
               <div class="dm-detail-row">
                 <span
-                    class="dm-detail-label"
+                  class="dm-detail-label"
                 >{{
                   t('documentManager.type')
-                  }}</span><span>{{ selectedDoc.fileExt.toUpperCase() }}</span>
+                }}</span><span>{{ selectedDoc.fileExt.toUpperCase() }}</span>
               </div>
               <div class="dm-detail-row">
                 <span class="dm-detail-label">{{ t('documentManager.path') }}</span><span
                   :title="selectedDoc.managedPath"
                   class="dm-detail-path"
-              >{{
+                >{{
                   selectedDoc.managedPath
                 }}</span>
               </div>
@@ -476,59 +496,59 @@
               <div class="dm-detail-row">
                 <span class="dm-detail-label">{{ t('documentManager.category') }}</span>
                 <el-select
-                    v-model="editCategoryId"
-                    :placeholder="t('documentManager.uncategorized')"
-                    clearable
-                    size="small"
-                    @change="saveCategory"
+                  v-model="editCategoryId"
+                  :placeholder="t('documentManager.uncategorized')"
+                  clearable
+                  size="small"
+                  @change="saveCategory"
                 >
                   <el-option
-                      v-for="cat in categories"
-                      :key="cat.id"
-                      :label="cat.name"
-                      :value="cat.id"
+                    v-for="cat in categories"
+                    :key="cat.id"
+                    :label="cat.name"
+                    :value="cat.id"
                   />
                 </el-select>
               </div>
               <div class="dm-detail-row">
                 <span class="dm-detail-label">{{ t('documentManager.tags') }}</span>
                 <el-input
-                    v-model="editTags"
-                    :placeholder="t('documentManager.tagsHint')"
-                    size="small"
-                    @blur="saveTags"
-                    @keyup.enter="saveTags"
+                  v-model="editTags"
+                  :placeholder="t('documentManager.tagsHint')"
+                  size="small"
+                  @blur="saveTags"
+                  @keyup.enter="saveTags"
                 />
               </div>
               <div class="dm-detail-row">
                 <span class="dm-detail-label">{{ t('documentManager.notes') }}</span>
                 <el-input
-                    v-model="editNotes"
-                    :placeholder="t('documentManager.notesPlaceholder')"
-                    :rows="2"
-                    size="small"
-                    type="textarea"
-                    @blur="saveNotes"
+                  v-model="editNotes"
+                  :placeholder="t('documentManager.notesPlaceholder')"
+                  :rows="2"
+                  size="small"
+                  type="textarea"
+                  @blur="saveNotes"
                 />
               </div>
             </div>
             <div class="dm-detail-actions">
               <el-button
-                  size="small"
-                  @click="openDocument(selectedDoc)"
+                size="small"
+                @click="openDocument(selectedDoc)"
               >
                 {{ t('documentManager.open') }}
               </el-button>
               <el-button
-                  size="small"
-                  @click="openFolder(selectedDoc)"
+                size="small"
+                @click="openFolder(selectedDoc)"
               >
                 {{ t('documentManager.locate') }}
               </el-button>
               <el-button
-                  size="small"
-                  type="danger"
-                  @click="confirmDelete(selectedDoc)"
+                size="small"
+                type="danger"
+                @click="confirmDelete(selectedDoc)"
               >
                 {{
                   t('common.delete')
@@ -540,24 +560,24 @@
 
         <template v-if="activeTab === 'history'">
           <div
-              v-if="importHistory.length === 0"
-              class="dm-empty"
+            v-if="importHistory.length === 0"
+            class="dm-empty"
           >
-            <el-empty :description="t('documentManager.noHistory')"/>
+            <el-empty :description="t('documentManager.noHistory')" />
           </div>
           <div
-              v-else
-              class="dm-history-page"
+            v-else
+            class="dm-history-page"
           >
             <div
-                v-for="h in importHistory"
-                :key="h.id"
-                class="dm-history-card"
+              v-for="h in importHistory"
+              :key="h.id"
+              class="dm-history-card"
             >
               <div class="dm-history-card-hd">
                 <span class="dm-history-badge">{{
-                    h.storageMode === 'repo' ? t('documentManager.migrate') : t('documentManager.index')
-                  }}</span>
+                  h.storageMode === 'repo' ? t('documentManager.migrate') : t('documentManager.index')
+                }}</span>
                 <span class="dm-history-fc">{{ h.fileCount }} {{ t('documentManager.fileCount') }}</span>
                 <span class="dm-history-time">{{ formatTime(h.createdAt) }}</span>
               </div>
@@ -567,7 +587,7 @@
                     t('documentManager.sourceDir')
                   }}</span><span
                     class="dm-history-val"
-                >{{ h.sourceDir }}</span>
+                  >{{ h.sourceDir }}</span>
                 </div>
                 <div class="dm-history-row">
                   <span class="dm-history-label">{{
@@ -579,23 +599,23 @@
               </div>
               <div class="dm-history-card-ft">
                 <el-button
-                    size="small"
-                    text
-                    @click="toggleHistoryFiles(h.id)"
+                  size="small"
+                  text
+                  @click="toggleHistoryFiles(h.id)"
                 >
                   {{ h._files ? t('documentManager.collapse') : t('documentManager.expand') }} ({{
                     h.fileCount
                   }}{{ t('documentManager.fileCount') }})
                 </el-button>
                 <el-popconfirm
-                    :title="t('documentManager.undoConfirm')"
-                    @confirm="undoImportFn(h.id)"
+                  :title="t('documentManager.undoConfirm')"
+                  @confirm="undoImportFn(h.id)"
                 >
                   <template #reference>
                     <el-button
-                        plain
-                        size="small"
-                        type="danger"
+                      plain
+                      size="small"
+                      type="danger"
                     >
                       {{ t('documentManager.undo') }}
                     </el-button>
@@ -603,23 +623,23 @@
                 </el-popconfirm>
               </div>
               <div
-                  v-if="h._files"
-                  class="dm-history-files"
+                v-if="h._files"
+                class="dm-history-files"
               >
                 <div
-                    v-for="f in h._files"
-                    :key="f.sourcePath"
-                    class="dm-history-file-item"
+                  v-for="f in h._files"
+                  :key="f.sourcePath"
+                  class="dm-history-file-item"
                 >
                   <el-icon>
-                    <Document/>
+                    <Document />
                   </el-icon>
                   <span>{{ f.fileName }}</span>
                   <el-button
-                      size="small"
-                      text
-                      type="danger"
-                      @click="undoImportItemFn(h.id, f.docFileId, h)"
+                    size="small"
+                    text
+                    type="danger"
+                    @click="undoImportItemFn(h.id, f.docFileId, h)"
                   >
                     {{ t('documentManager.undo') }}
                   </el-button>
@@ -632,22 +652,22 @@
     </div>
 
     <el-dialog
-        v-model="showAddRoot"
-        :title="t('documentManager.addRootDir')"
-        width="480px"
+      v-model="showAddRoot"
+      :title="t('documentManager.addRootDir')"
+      width="480px"
     >
       <el-form label-width="80px">
         <el-form-item :label="t('documentManager.dirAlias')">
           <el-input
-              v-model="newRootName"
-              :placeholder="t('documentManager.dirAliasPlaceholder')"
+            v-model="newRootName"
+            :placeholder="t('documentManager.dirAliasPlaceholder')"
           />
         </el-form-item>
         <el-form-item :label="t('documentManager.dirPath')">
           <div style="display:flex;gap:8px;width:100%">
             <el-input
-                v-model="newRootPath"
-                :placeholder="t('documentManager.dirPathPlaceholder')"
+              v-model="newRootPath"
+              :placeholder="t('documentManager.dirPathPlaceholder')"
             />
             <el-button @click="browseRootPath">
               {{ t('common.browse') }}
@@ -657,7 +677,7 @@
       </el-form>
       <div class="dm-hint-warn">
         <el-icon>
-          <Warning/>
+          <Warning />
         </el-icon>
         <span>{{ t('documentManager.dirPathHint') }}</span>
       </div>
@@ -666,9 +686,9 @@
           {{ t('common.cancel') }}
         </el-button>
         <el-button
-            :disabled="!newRootName || !newRootPath"
-            type="primary"
-            @click="confirmAddRoot"
+          :disabled="!newRootName || !newRootPath"
+          type="primary"
+          @click="confirmAddRoot"
         >
           {{ t('common.confirm') }}
         </el-button>
@@ -676,39 +696,39 @@
     </el-dialog>
 
     <el-dialog
-        v-model="showAddCategory"
-        :title="t('documentManager.newCategory')"
-        width="420px"
+      v-model="showAddCategory"
+      :title="t('documentManager.newCategory')"
+      width="420px"
     >
       <el-form label-width="80px">
         <el-form-item :label="t('documentManager.categoryName')">
           <el-input
-              v-model="newCategoryName"
-              :placeholder="t('documentManager.categoryNameHint')"
+            v-model="newCategoryName"
+            :placeholder="t('documentManager.categoryNameHint')"
           />
         </el-form-item>
         <el-form-item :label="t('documentManager.icon')">
           <div class="dm-icon-picker">
             <span
-                v-for="ic in catIcons"
-                :key="ic.value"
-                :class="{ active: newCategoryIcon === ic.value }"
-                class="dm-icon-option"
-                @click="newCategoryIcon = ic.value"
+              v-for="ic in catIcons"
+              :key="ic.value"
+              :class="{ active: newCategoryIcon === ic.value }"
+              class="dm-icon-option"
+              @click="newCategoryIcon = ic.value"
             >
-              <el-icon :size="18"><component :is="ic.component"/></el-icon>
+              <el-icon :size="18"><component :is="ic.component" /></el-icon>
             </span>
           </div>
         </el-form-item>
         <el-form-item :label="t('documentManager.color')">
           <div class="dm-color-picker">
             <span
-                v-for="c in catColors"
-                :key="c"
-                :class="{ active: newCategoryColor === c }"
-                :style="{ background: c }"
-                class="dm-color-option"
-                @click="newCategoryColor = c"
+              v-for="c in catColors"
+              :key="c"
+              :class="{ active: newCategoryColor === c }"
+              :style="{ background: c }"
+              class="dm-color-option"
+              @click="newCategoryColor = c"
             />
           </div>
         </el-form-item>
@@ -718,9 +738,9 @@
           {{ t('common.cancel') }}
         </el-button>
         <el-button
-            :disabled="!newCategoryName.trim()"
-            type="primary"
-            @click="confirmAddCategory"
+          :disabled="!newCategoryName.trim()"
+          type="primary"
+          @click="confirmAddCategory"
         >
           {{
             t('common.confirm')
@@ -730,15 +750,15 @@
     </el-dialog>
 
     <el-dialog
-        v-model="showRenameCatDialog"
-        :title="t('documentManager.renameCategory')"
-        width="400px"
+      v-model="showRenameCatDialog"
+      :title="t('documentManager.renameCategory')"
+      width="400px"
     >
       <el-form label-width="80px">
         <el-form-item :label="t('documentManager.newName')">
           <el-input
-              v-model="renameCatName"
-              :placeholder="t('documentManager.newNamePlaceholder')"
+            v-model="renameCatName"
+            :placeholder="t('documentManager.newNamePlaceholder')"
           />
         </el-form-item>
       </el-form>
@@ -747,8 +767,8 @@
           {{ t('common.cancel') }}
         </el-button>
         <el-button
-            type="primary"
-            @click="confirmRenameCat"
+          type="primary"
+          @click="confirmRenameCat"
         >
           {{ t('common.confirm') }}
         </el-button>
@@ -756,40 +776,40 @@
     </el-dialog>
 
     <el-dialog
-        v-model="showImportDialog"
-        :close-on-click-modal="!importing"
-        :close-on-press-escape="!importing"
-        :show-close="!importing"
-        :title="t('documentManager.addDoc')"
-        width="500px"
+      v-model="showImportDialog"
+      :close-on-click-modal="!importing"
+      :close-on-press-escape="!importing"
+      :show-close="!importing"
+      :title="t('documentManager.addDoc')"
+      width="500px"
     >
       <el-form label-width="80px">
         <el-form-item :label="t('documentManager.targetDir')">
           <el-select
-              v-model="importRootId"
-              :placeholder="t('documentManager.selectRoot')"
-              style="width:100%"
+            v-model="importRootId"
+            :placeholder="t('documentManager.selectRoot')"
+            style="width:100%"
           >
             <el-option
-                v-for="r in roots"
-                :key="r.id"
-                :label="r.name"
-                :value="r.id"
+              v-for="r in roots"
+              :key="r.id"
+              :label="r.name"
+              :value="r.id"
             />
           </el-select>
         </el-form-item>
         <el-form-item :label="t('documentManager.targetCategory')">
           <el-select
-              v-model="importCategoryId"
-              :placeholder="t('documentManager.uncategorized')"
-              clearable
-              style="width:100%"
+            v-model="importCategoryId"
+            :placeholder="t('documentManager.uncategorized')"
+            clearable
+            style="width:100%"
           >
             <el-option
-                v-for="c in importCategories"
-                :key="c.id"
-                :label="c.name"
-                :value="c.id"
+              v-for="c in importCategories"
+              :key="c.id"
+              :label="c.name"
+              :value="c.id"
             />
           </el-select>
         </el-form-item>
@@ -808,15 +828,15 @@
             {{ t('documentManager.selectFiles') }}
           </el-button>
           <div
-              v-if="importFiles.length > 0"
-              class="dm-import-files"
+            v-if="importFiles.length > 0"
+            class="dm-import-files"
           >
             <el-tag
-                v-for="(f,i) in importFiles"
-                :key="i"
-                closable
-                style="margin:2px"
-                @close="importFiles.splice(i,1)"
+              v-for="(f,i) in importFiles"
+              :key="i"
+              closable
+              style="margin:2px"
+              @close="importFiles.splice(i,1)"
             >
               {{ getFileName(f) }}
             </el-tag>
@@ -824,26 +844,26 @@
         </el-form-item>
       </el-form>
       <div
-          v-if="importRootId != null && importMode === 'repo'"
-          class="dm-hint-warn"
+        v-if="importRootId != null && importMode === 'repo'"
+        class="dm-hint-warn"
       >
         <el-icon>
-          <Warning/>
+          <Warning />
         </el-icon>
         <span>{{ t('documentManager.fileMoveHint', {path: getImportTargetPath()}) }}</span>
       </div>
       <template #footer>
         <el-button
-            :disabled="importing"
-            @click="showImportDialog = false"
+          :disabled="importing"
+          @click="showImportDialog = false"
         >
           {{ t('common.cancel') }}
         </el-button>
         <el-button
-            :disabled="!importRootId || importFiles.length === 0 || importing"
-            :loading="importing"
-            type="primary"
-            @click="confirmImport"
+          :disabled="!importRootId || importFiles.length === 0 || importing"
+          :loading="importing"
+          type="primary"
+          @click="confirmImport"
         >
           {{
             importing ? t('documentManager.importing', {count: importFiles.length}) : t('documentManager.confirmImportBtn')
@@ -853,24 +873,24 @@
     </el-dialog>
 
     <el-dialog
-        v-model="showScanDialog"
-        :close-on-click-modal="!scanImporting"
-        :close-on-press-escape="!scanImporting"
-        :show-close="!scanImporting"
-        :title="t('documentManager.scanFolder')"
-        width="500px"
+      v-model="showScanDialog"
+      :close-on-click-modal="!scanImporting"
+      :close-on-press-escape="!scanImporting"
+      :show-close="!scanImporting"
+      :title="t('documentManager.scanFolder')"
+      width="500px"
     >
       <el-form label-width="80px">
         <el-form-item :label="t('documentManager.scanPath')">
           <div style="display:flex;gap:8px;width:100%">
             <el-input
-                v-model="scanPath"
-                :disabled="scanImporting"
-                :placeholder="t('documentManager.scanPathPlaceholder')"
+              v-model="scanPath"
+              :disabled="scanImporting"
+              :placeholder="t('documentManager.scanPathPlaceholder')"
             />
             <el-button
-                :disabled="scanImporting"
-                @click="browseScanPath"
+              :disabled="scanImporting"
+              @click="browseScanPath"
             >
               {{ t('common.browse') }}
             </el-button>
@@ -878,39 +898,39 @@
         </el-form-item>
         <el-form-item :label="t('documentManager.targetDir')">
           <el-select
-              v-model="scanImportRootId"
-              :disabled="scanImporting"
-              :placeholder="t('documentManager.selectRoot')"
-              style="width:100%"
+            v-model="scanImportRootId"
+            :disabled="scanImporting"
+            :placeholder="t('documentManager.selectRoot')"
+            style="width:100%"
           >
             <el-option
-                v-for="r in roots"
-                :key="r.id"
-                :label="r.name"
-                :value="r.id"
+              v-for="r in roots"
+              :key="r.id"
+              :label="r.name"
+              :value="r.id"
             />
           </el-select>
         </el-form-item>
         <el-form-item :label="t('documentManager.targetCategory')">
           <el-select
-              v-model="scanCategoryId"
-              :disabled="scanImporting"
-              :placeholder="t('documentManager.uncategorized')"
-              clearable
-              style="width:100%"
+            v-model="scanCategoryId"
+            :disabled="scanImporting"
+            :placeholder="t('documentManager.uncategorized')"
+            clearable
+            style="width:100%"
           >
             <el-option
-                v-for="c in scanCategories"
-                :key="c.id"
-                :label="c.name"
-                :value="c.id"
+              v-for="c in scanCategories"
+              :key="c.id"
+              :label="c.name"
+              :value="c.id"
             />
           </el-select>
         </el-form-item>
         <el-form-item :label="t('documentManager.importMode')">
           <el-radio-group
-              v-model="importMode"
-              :disabled="scanImporting"
+            v-model="importMode"
+            :disabled="scanImporting"
           >
             <el-radio value="index">
               {{ t('documentManager.index') }}
@@ -922,39 +942,39 @@
         </el-form-item>
       </el-form>
       <div
-          v-if="scanning"
-          style="text-align:center;padding:20px"
+        v-if="scanning"
+        style="text-align:center;padding:20px"
       >
         <el-icon
-            :size="32"
-            class="is-loading"
+          :size="32"
+          class="is-loading"
         >
-          <Loading/>
+          <Loading />
         </el-icon>
         <p>{{ t('documentManager.scanning') }}</p>
       </div>
       <div
-          v-else-if="scannedFiles.length > 0"
-          class="dm-scan-list"
+        v-else-if="scannedFiles.length > 0"
+        class="dm-scan-list"
       >
         <p>{{ t('documentManager.foundFiles', {count: scannedFiles.length}) }}</p>
         <div class="dm-scan-files">
           <div
-              v-for="f in scannedFiles"
-              :key="f.path"
-              :class="{ checked: scanSelected.has(f.path) }"
-              class="dm-scan-file-item"
-              role="button"
-              tabindex="0"
-              @click="toggleScanSelect(f.path)"
-              @keydown.enter.prevent="toggleScanSelect(f.path)"
-              @keydown.space.prevent="toggleScanSelect(f.path)"
+            v-for="f in scannedFiles"
+            :key="f.path"
+            :class="{ checked: scanSelected.has(f.path) }"
+            class="dm-scan-file-item"
+            role="button"
+            tabindex="0"
+            @click="toggleScanSelect(f.path)"
+            @keydown.enter.prevent="toggleScanSelect(f.path)"
+            @keydown.space.prevent="toggleScanSelect(f.path)"
           >
             <el-icon v-if="scanSelected.has(f.path)">
-              <Select/>
+              <Select />
             </el-icon>
             <el-icon v-else>
-              <Document/>
+              <Document />
             </el-icon>
             <span>{{ f.name }}</span>
             <span class="dm-scan-size">{{ formatFileSize(f.size) }}</span>
@@ -963,24 +983,24 @@
       </div>
       <template #footer>
         <el-button
-            :disabled="scanImporting"
-            @click="showScanDialog = false"
+          :disabled="scanImporting"
+          @click="showScanDialog = false"
         >
           {{ t('common.cancel') }}
         </el-button>
         <el-button
-            :disabled="scannedFiles.length === 0 || scanImporting"
-            @click="toggleScanSelectAll"
+          :disabled="scannedFiles.length === 0 || scanImporting"
+          @click="toggleScanSelectAll"
         >
           {{
             scanSelected.size === scannedFiles.length ? t('documentManager.deselectAll') : t('documentManager.selectAll')
           }}
         </el-button>
         <el-button
-            :disabled="scanSelected.size === 0 || !scanImportRootId || scanImporting"
-            :loading="scanImporting"
-            type="primary"
-            @click="importScanned"
+          :disabled="scanSelected.size === 0 || !scanImportRootId || scanImporting"
+          :loading="scanImporting"
+          type="primary"
+          @click="importScanned"
         >
           {{
             scanImporting ? t('documentManager.importing', {count: scanSelected.size}) : t('documentManager.importSelected', {count: scanSelected.size})
@@ -990,48 +1010,48 @@
     </el-dialog>
 
     <div
-        v-if="dragover"
-        class="dm-drop-overlay"
+      v-if="dragover"
+      class="dm-drop-overlay"
     >
       <el-icon :size="48">
-        <UploadFilled/>
+        <UploadFilled />
       </el-icon>
       <p>{{ t('documentManager.dropToAdd') }}</p>
     </div>
   </div>
 
   <ContextMenu
-      :show="ctxMenuVisible"
-      :x="ctxMenuX"
-      :y="ctxMenuY"
-      @close="closeCtxMenu"
+    :show="ctxMenuVisible"
+    :x="ctxMenuX"
+    :y="ctxMenuY"
+    @close="closeCtxMenu"
   >
     <div
-        class="context-menu-item"
-        @click="startMove(ctxMenuDoc)"
+      class="context-menu-item"
+      @click="startMove(ctxMenuDoc)"
     >
       <el-icon :size="14">
-        <Folder/>
+        <Folder />
       </el-icon>
       <span>{{ t('common.move') }}</span>
     </div>
-    <div class="context-menu-divider"/>
+    <div class="context-menu-divider" />
     <div
-        class="context-menu-item context-menu-item-danger"
-        @click="contextDelete(ctxMenuDoc)"
+      class="context-menu-item context-menu-item-danger"
+      @click="contextDelete(ctxMenuDoc)"
     >
       <el-icon :size="14">
-        <Close/>
+        <Close />
       </el-icon>
       <span>{{ t('common.delete') }}</span>
     </div>
   </ContextMenu>
 
   <el-dialog
-      v-model="showMoveDialog"
-      :title="t('documentManager.moveFile')"
-      width="420px"
-      @closed="closeCtxMenu"
+    v-model="showMoveDialog"
+    :title="t('documentManager.moveFile')"
+    width="420px"
+    @closed="closeCtxMenu"
   >
     <div class="dm-move-body">
       <div class="dm-move-section">
@@ -1039,21 +1059,21 @@
           {{ t('documentManager.moveToRoot') }}
         </div>
         <el-select
-            v-model="moveTargetRootId"
-            :placeholder="t('documentManager.selectRoot')"
-            style="width:100%"
-            @change="onMoveRootChange"
+          v-model="moveTargetRootId"
+          :placeholder="t('documentManager.selectRoot')"
+          style="width:100%"
+          @change="onMoveRootChange"
         >
           <el-option
-              v-for="root in roots"
-              :key="root.id"
-              :label="root.name"
-              :value="root.id"
+            v-for="root in roots"
+            :key="root.id"
+            :label="root.name"
+            :value="root.id"
           />
         </el-select>
         <div
-            v-if="moveDoc.storageMode === 'repo'"
-            class="dm-move-hint"
+          v-if="moveDoc.storageMode === 'repo'"
+          class="dm-move-hint"
         >
           {{ t('documentManager.migrateHint') }}
         </div>
@@ -1063,16 +1083,16 @@
           {{ t('documentManager.moveToCategory') }}
         </div>
         <el-select
-            v-model="moveTargetCategoryId"
-            :placeholder="t('documentManager.uncategorized')"
-            clearable
-            style="width:100%"
+          v-model="moveTargetCategoryId"
+          :placeholder="t('documentManager.uncategorized')"
+          clearable
+          style="width:100%"
         >
           <el-option
-              v-for="cat in moveCategories"
-              :key="cat.id"
-              :label="cat.name"
-              :value="cat.id"
+            v-for="cat in moveCategories"
+            :key="cat.id"
+            :label="cat.name"
+            :value="cat.id"
           />
         </el-select>
       </div>
@@ -1082,9 +1102,9 @@
         {{ t('common.cancel') }}
       </el-button>
       <el-button
-          :disabled="!hasMoveChange"
-          type="primary"
-          @click="confirmMove"
+        :disabled="!hasMoveChange"
+        type="primary"
+        @click="confirmMove"
       >
         {{ t('common.ok') }}
       </el-button>
@@ -1092,9 +1112,9 @@
   </el-dialog>
 
   <el-dialog
-      v-model="showGuide"
-      :title="t('documentManager.welcome')"
-      width="560px"
+    v-model="showGuide"
+    :title="t('documentManager.welcome')"
+    width="560px"
   >
     <div class="dm-guide-body">
       <p class="dm-guide-desc">
@@ -1102,9 +1122,9 @@
       </p>
       <div class="dm-guide-steps">
         <div
-            v-for="(step, idx) in guideSteps"
-            :key="idx"
-            class="dm-guide-step"
+          v-for="(step, idx) in guideSteps"
+          :key="idx"
+          class="dm-guide-step"
         >
           <div class="dm-guide-step-num">
             {{ idx + 1 }}
@@ -1127,8 +1147,8 @@
     </div>
     <template #footer>
       <el-button
-          type="primary"
-          @click="dismissGuide"
+        type="primary"
+        @click="dismissGuide"
       >
         {{ t('documentManager.startUsing') }}
       </el-button>
@@ -1136,61 +1156,61 @@
   </el-dialog>
 
   <el-dialog
-      v-model="showOrphanDialog"
-      :title="t('documentManager.orphanFilesTitle')"
-      width="560px"
+    v-model="showOrphanDialog"
+    :title="t('documentManager.orphanFilesTitle')"
+    width="560px"
   >
     <div
-        v-if="orphanLoading"
-        style="text-align:center;padding:20px"
+      v-if="orphanLoading"
+      style="text-align:center;padding:20px"
     >
       <el-icon
-          :size="32"
-          class="is-loading"
+        :size="32"
+        class="is-loading"
       >
-        <Loading/>
+        <Loading />
       </el-icon>
       <p>{{ t('documentManager.scanning') }}</p>
     </div>
     <div
-        v-else-if="orphanResults.length === 0"
-        style="text-align:center;padding:20px"
+      v-else-if="orphanResults.length === 0"
+      style="text-align:center;padding:20px"
     >
-      <el-empty :description="t('documentManager.noOrphanFiles')"/>
+      <el-empty :description="t('documentManager.noOrphanFiles')" />
     </div>
     <div
-        v-else
-        class="dm-orphan-list"
+      v-else
+      class="dm-orphan-list"
     >
       <div
-          v-for="result in orphanResults"
-          :key="result.rootId"
-          class="dm-orphan-group"
+        v-for="result in orphanResults"
+        :key="result.rootId"
+        class="dm-orphan-group"
       >
         <div class="dm-orphan-group-title">
           {{ result.rootName }}
         </div>
         <div
-            v-for="f in result.files"
-            :key="f.path"
-            :class="{ checked: orphanSelected.has(f.path) }"
-            class="dm-scan-file-item"
-            role="button"
-            tabindex="0"
-            @click="toggleOrphan(f.path)"
-            @keydown.enter.prevent="toggleOrphan(f.path)"
-            @keydown.space.prevent="toggleOrphan(f.path)"
+          v-for="f in result.files"
+          :key="f.path"
+          :class="{ checked: orphanSelected.has(f.path) }"
+          class="dm-scan-file-item"
+          role="button"
+          tabindex="0"
+          @click="toggleOrphan(f.path)"
+          @keydown.enter.prevent="toggleOrphan(f.path)"
+          @keydown.space.prevent="toggleOrphan(f.path)"
         >
           <el-icon v-if="orphanSelected.has(f.path)">
-            <Select/>
+            <Select />
           </el-icon>
           <el-icon v-else>
-            <Document/>
+            <Document />
           </el-icon>
           <span>{{ f.name }}</span>
           <span
-              v-if="f.categoryName"
-              class="dm-orphan-cat"
+            v-if="f.categoryName"
+            class="dm-orphan-cat"
           >{{ f.categoryName }}</span>
           <span class="dm-scan-size">{{ formatFileSize(f.size) }}</span>
         </div>
@@ -1201,17 +1221,17 @@
         {{ t('documentManager.close') }}
       </el-button>
       <el-button
-          v-if="orphanResults.length > 0"
-          @click="toggleOrphanSelectAll"
+        v-if="orphanResults.length > 0"
+        @click="toggleOrphanSelectAll"
       >
         {{
           orphanSelected.size === totalOrphanCount ? t('documentManager.deselectAll') : t('documentManager.selectAll')
         }}
       </el-button>
       <el-button
-          :disabled="orphanSelected.size === 0"
-          type="primary"
-          @click="importOrphans"
+        :disabled="orphanSelected.size === 0"
+        type="primary"
+        @click="importOrphans"
       >
         {{ t('documentManager.importSelected', {count: orphanSelected.size}) }}
       </el-button>
@@ -1219,33 +1239,33 @@
   </el-dialog>
 
   <el-dialog
-      v-model="tagManagerVisible"
-      :title="t('documentManager.tagManager')"
-      width="420px"
+    v-model="tagManagerVisible"
+    :title="t('documentManager.tagManager')"
+    width="420px"
   >
     <div
-        v-if="allTags.length === 0"
-        class="dm-empty"
+      v-if="allTags.length === 0"
+      class="dm-empty"
     >
       {{ t('documentManager.tagEmpty') }}
     </div>
     <div
-        v-for="tg in allTags"
-        :key="tg.tag"
-        class="dm-tag-row"
+      v-for="tg in allTags"
+      :key="tg.tag"
+      class="dm-tag-row"
     >
       <span class="dm-tag-name">{{ tg.tag }}</span>
       <span class="dm-tag-count">{{ t('documentManager.tagCount', {n: tg.count}) }}</span>
       <el-button
-          size="small"
-          @click="renameTag(tg.tag)"
+        size="small"
+        @click="renameTag(tg.tag)"
       >
         {{ t('documentManager.tagRename') }}
       </el-button>
       <el-button
-          size="small"
-          type="danger"
-          @click="removeTag(tg.tag)"
+        size="small"
+        type="danger"
+        @click="removeTag(tg.tag)"
       >
         {{ t('documentManager.tagRemove') }}
       </el-button>

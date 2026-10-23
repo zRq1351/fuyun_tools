@@ -1,22 +1,22 @@
 <template>
   <div
-      :class="contentType"
-      class="formatted-content"
-      @click="handleClick"
+    :class="contentType"
+    class="formatted-content"
+    @click="handleClick"
   >
     <!-- eslint-disable vue/no-v-html -->
     <div
-        v-if="contentType === 'markdown'"
-        class="markdown-body"
-        v-html="renderedHtml"
+      v-if="contentType === 'markdown'"
+      class="markdown-body"
+      v-html="renderedHtml"
     />
     <pre v-else-if="contentType === 'code'"><code
         class="hljs"
         v-html="renderedHtml"
     /></pre>
     <div
-        v-else
-        class="plain-text"
+      v-else
+      class="plain-text"
     >
       {{ content }}
     </div>

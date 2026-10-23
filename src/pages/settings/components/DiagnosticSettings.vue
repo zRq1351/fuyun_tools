@@ -1,8 +1,8 @@
 <template>
   <div class="diagnostic-settings">
     <el-card
-        class="overview-card"
-        shadow="never"
+      class="overview-card"
+      shadow="never"
     >
       <template #header>
         <div class="card-header">
@@ -19,22 +19,22 @@
           </div>
         </div>
         <el-switch
-            :model-value="loggingEnabled"
-            @update:model-value="(val) => emit('toggleLogging', val)"
+          :model-value="loggingEnabled"
+          @update:model-value="(val) => emit('toggleLogging', val)"
         />
       </div>
     </el-card>
 
     <el-card
-        class="overview-card"
-        shadow="never"
+      class="overview-card"
+      shadow="never"
     >
       <template #header>
         <div class="card-header">
           <span>{{ $t('settings.diagnostic.healthOverview') }}</span>
           <el-button
-              :loading="loading"
-              @click="loadDiagnostics"
+            :loading="loading"
+            @click="loadDiagnostics"
           >
             {{
               $t('settings.diagnostic.refreshDiagnosis')
@@ -80,23 +80,23 @@
     </el-card>
 
     <el-card
-        class="overview-card perf-card"
-        shadow="never"
+      class="overview-card perf-card"
+      shadow="never"
     >
       <template #header>
         <div class="card-header">
           <span>{{ $t('settings.diagnostic.perfTitle') }}</span>
           <div class="perf-actions">
             <el-button
-                :loading="perfLoading"
-                size="small"
-                @click="loadPerfDashboard"
+              :loading="perfLoading"
+              size="small"
+              @click="loadPerfDashboard"
             >
               {{ $t('settings.diagnostic.perfRefresh') }}
             </el-button>
             <el-button
-                size="small"
-                @click="resetPerfMetrics"
+              size="small"
+              @click="resetPerfMetrics"
             >
               {{ $t('settings.diagnostic.perfReset') }}
             </el-button>
@@ -106,96 +106,126 @@
 
       <div class="overview-grid perf-grid">
         <div class="overview-item">
-          <div class="overview-label">{{ $t('settings.diagnostic.perfProcessMemory') }}</div>
-          <div class="overview-value">{{ perf.system.processMemoryMb || 0 }} MB</div>
+          <div class="overview-label">
+            {{ $t('settings.diagnostic.perfProcessMemory') }}
+          </div>
+          <div class="overview-value">
+            {{ perf.system.processMemoryMb || 0 }} MB
+          </div>
         </div>
         <div class="overview-item">
-          <div class="overview-label">{{ $t('settings.diagnostic.perfSystemMemory') }}</div>
+          <div class="overview-label">
+            {{ $t('settings.diagnostic.perfSystemMemory') }}
+          </div>
           <div class="overview-value">
             {{ perf.system.usedMemoryMb || 0 }} / {{ perf.system.totalMemoryMb || 0 }} MB
             （{{ (perf.system.memoryUsagePercent || 0).toFixed(1) }}%）
           </div>
         </div>
         <div class="overview-item">
-          <div class="overview-label">{{ $t('settings.diagnostic.perfCpu') }}</div>
-          <div class="overview-value">{{ (perf.system.cpuUsagePercent || 0).toFixed(1) }}%</div>
-          <div class="form-hint">{{ $t('settings.diagnostic.perfCpuSystemHint') }}</div>
+          <div class="overview-label">
+            {{ $t('settings.diagnostic.perfCpu') }}
+          </div>
+          <div class="overview-value">
+            {{ (perf.system.cpuUsagePercent || 0).toFixed(1) }}%
+          </div>
+          <div class="form-hint">
+            {{ $t('settings.diagnostic.perfCpuSystemHint') }}
+          </div>
         </div>
         <div class="overview-item">
-          <div class="overview-label">{{ $t('settings.diagnostic.perfProcessCpu') }}</div>
-          <div class="overview-value">{{ (perf.system.processCpuUsagePercent || 0).toFixed(1) }}%</div>
-          <div class="form-hint">{{ $t('settings.diagnostic.perfCpuProcessHint') }}</div>
+          <div class="overview-label">
+            {{ $t('settings.diagnostic.perfProcessCpu') }}
+          </div>
+          <div class="overview-value">
+            {{ (perf.system.processCpuUsagePercent || 0).toFixed(1) }}%
+          </div>
+          <div class="form-hint">
+            {{ $t('settings.diagnostic.perfCpuProcessHint') }}
+          </div>
         </div>
         <div class="overview-item">
-          <div class="overview-label">{{ $t('settings.diagnostic.perfSamples') }}</div>
-          <div class="overview-value">{{ perf.sampleCount }}</div>
+          <div class="overview-label">
+            {{ $t('settings.diagnostic.perfSamples') }}
+          </div>
+          <div class="overview-value">
+            {{ perf.sampleCount }}
+          </div>
         </div>
         <div class="overview-item">
-          <div class="overview-label">{{ $t('settings.diagnostic.perfSlow') }}</div>
-          <div class="overview-value warning">{{ perf.slowCount }}</div>
+          <div class="overview-label">
+            {{ $t('settings.diagnostic.perfSlow') }}
+          </div>
+          <div class="overview-value warning">
+            {{ perf.slowCount }}
+          </div>
         </div>
         <div class="overview-item">
-          <div class="overview-label">{{ $t('settings.diagnostic.perfErrors') }}</div>
-          <div class="overview-value error">{{ perf.errorCount }}</div>
+          <div class="overview-label">
+            {{ $t('settings.diagnostic.perfErrors') }}
+          </div>
+          <div class="overview-value error">
+            {{ perf.errorCount }}
+          </div>
         </div>
       </div>
 
       <div
-          v-if="perf.sampleCount === 0"
-          class="form-hint perf-empty"
+        v-if="perf.sampleCount === 0"
+        class="form-hint perf-empty"
       >
         {{ $t('settings.diagnostic.perfEmpty') }}
       </div>
 
       <div
-          v-else
-          class="perf-sections"
+        v-else
+        class="perf-sections"
       >
         <div
-            v-for="section in perfSections"
-            :key="section.key"
-            class="perf-section"
+          v-for="section in perfSections"
+          :key="section.key"
+          class="perf-section"
         >
           <div class="item-title perf-section-title">
             {{ section.title }}
           </div>
           <div
-              v-if="!section.items.length"
-              class="form-hint"
+            v-if="!section.items.length"
+            class="form-hint"
           >
             {{ $t('settings.diagnostic.perfEmptySection') }}
           </div>
           <table
-              v-else
-              class="perf-table"
+            v-else
+            class="perf-table"
           >
             <thead>
-            <tr>
-              <th>{{ $t('settings.diagnostic.perfColLabel') }}</th>
-              <th>{{ $t('settings.diagnostic.perfColAvg') }}</th>
-              <th>{{ $t('settings.diagnostic.perfColMax') }}</th>
-              <th>{{ $t('settings.diagnostic.perfColSamples') }}</th>
-              <th>{{ $t('settings.diagnostic.perfColStatus') }}</th>
-            </tr>
+              <tr>
+                <th>{{ $t('settings.diagnostic.perfColLabel') }}</th>
+                <th>{{ $t('settings.diagnostic.perfColAvg') }}</th>
+                <th>{{ $t('settings.diagnostic.perfColMax') }}</th>
+                <th>{{ $t('settings.diagnostic.perfColSamples') }}</th>
+                <th>{{ $t('settings.diagnostic.perfColStatus') }}</th>
+              </tr>
             </thead>
             <tbody>
-            <tr
+              <tr
                 v-for="item in section.items"
                 :key="item.key + section.key"
-            >
-              <td>{{ item.label }}</td>
-              <td>{{ Math.round(item.avgDurationMs) }} ms</td>
-              <td>{{ item.maxDurationMs }} ms</td>
-              <td>{{ item.sampleCount }}</td>
-              <td>
-                <el-tag
+              >
+                <td>{{ item.label }}</td>
+                <td>{{ Math.round(item.avgDurationMs) }} ms</td>
+                <td>{{ item.maxDurationMs }} ms</td>
+                <td>{{ item.sampleCount }}</td>
+                <td>
+                  <el-tag
                     :type="item.lastStatus === 'error' ? 'danger' : 'info'"
                     size="small"
-                >
-                  {{ item.lastStatus === 'error' ? $t('settings.diagnostic.statusError') : (item.lastStatus || '—') }}
-                </el-tag>
-              </td>
-            </tr>
+                  >
+                    {{ item.lastStatus === 'error' ? $t('settings.diagnostic.statusError') : (item.lastStatus || '—') }}
+                  </el-tag>
+                </td>
+              </tr>
             </tbody>
           </table>
         </div>
@@ -203,10 +233,10 @@
     </el-card>
 
     <el-card
-        v-for="item in items"
-        :key="item.key"
-        class="diagnostic-card"
-        shadow="never"
+      v-for="item in items"
+      :key="item.key"
+      class="diagnostic-card"
+      shadow="never"
     >
       <template #header>
         <div class="card-header">
@@ -226,8 +256,8 @@
 
       <ul class="detail-list">
         <li
-            v-for="detail in item.details"
-            :key="detail"
+          v-for="detail in item.details"
+          :key="detail"
         >
           {{ detail }}
         </li>
@@ -235,10 +265,10 @@
 
       <div class="action-row">
         <el-button
-            v-for="action in item.actions"
-            :key="action.key"
-            size="small"
-            @click="handleAction(action)"
+          v-for="action in item.actions"
+          :key="action.key"
+          size="small"
+          @click="handleAction(action)"
         >
           {{ action.label }}
         </el-button>
@@ -250,9 +280,9 @@
     </el-card>
 
     <el-card
-        v-if="lastActionMessage"
-        class="result-card"
-        shadow="never"
+      v-if="lastActionMessage"
+      class="result-card"
+      shadow="never"
     >
       <template #header>
         <span>{{ $t('settings.diagnostic.lastActionResult') }}</span>

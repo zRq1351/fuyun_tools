@@ -1,6 +1,7 @@
 import './disableContextMenu'
 import {createApp} from 'vue'
-import 'element-plus/dist/index.css'
+// element-plus 样式由 unplugin 的 ElementPlusResolver 按组件按需注入（importStyle: 'css'），
+// 不再全量引入 dist/index.css（358KB），每个窗口只加载实际使用的组件样式
 import 'element-plus/theme-chalk/dark/css-vars.css'
 import '../pages/shared/theme-variables.css'
 import '../pages/shared/windowBase.css'

@@ -16,6 +16,7 @@ use crate::services::image_clipboard_manager::{
 };
 use crate::sync::{lock_arc_mutex, Mutex};
 use crate::ui::commands::*;
+use crate::ui::commands_settings::*;
 use crate::ui::commands_backup::*;
 use crate::ui::commands_clipboard::*;
 use crate::ui::commands_diagnostic::*;

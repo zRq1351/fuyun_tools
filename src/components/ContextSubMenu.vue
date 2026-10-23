@@ -1,23 +1,23 @@
 <template>
   <div
-      ref="itemRef"
-      class="context-menu-item context-menu-item-sub"
-      aria-haspopup="menu"
-      :aria-expanded="subOpen"
-      @mouseenter="openSub"
-      @mouseleave="onLeave"
+    ref="itemRef"
+    class="context-menu-item context-menu-item-sub"
+    aria-haspopup="menu"
+    :aria-expanded="subOpen"
+    @mouseenter="openSub"
+    @mouseleave="onLeave"
   >
     <span class="context-menu-item-label">{{ label }}</span>
     <span class="context-menu-item-arrow">▶</span>
     <ContextMenu
-        ref="subMenuRef"
-        :show="subOpen"
-        :x="subX"
-        :y="subY"
-        :z-index="zIndex + 1"
-        @close="subOpen = false"
+      ref="subMenuRef"
+      :show="subOpen"
+      :x="subX"
+      :y="subY"
+      :z-index="zIndex + 1"
+      @close="subOpen = false"
     >
-      <slot/>
+      <slot />
     </ContextMenu>
   </div>
 </template>

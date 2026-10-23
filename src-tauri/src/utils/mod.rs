@@ -7,6 +7,7 @@ pub mod database;
 pub mod database_schema;
 pub mod db_utils;
 pub mod document_database;
+pub mod document_database_schema;
 pub mod document_text_extract;
 pub mod icon_extractor;
 pub mod image_clipboard;
