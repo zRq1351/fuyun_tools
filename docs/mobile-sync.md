@@ -51,18 +51,31 @@
 
 ## Android App 构建
 
-环境要求：Android Studio（Ladybug 或更新）、JDK 17。
+移动端为 **Tauri v2 工程**（Rust 核心 + Vue 前端），位于同级目录 `../fuyun_tools_m/`，
+与 PC 端同步协议一致（`sync_proto.rs` 与桌面端 `features/sync` 对应，改协议需双边同步）。
+
+环境要求：Node.js 18+、Rust stable、JDK 17、Android Studio + SDK（含 NDK）。
 
 ```bash
-# 方式一：Android Studio 直接打开 fuyun_tools_m/ 目录（首次打开会自动生成 Gradle Wrapper）
-# 方式二：命令行（需本机已安装 Gradle 8.9+）
 cd ../fuyun_tools_m
-gradle wrapper          # 首次生成 gradlew（已有脚本，仅缺 wrapper jar）
-./gradlew assembleDebug # 产出 app/build/outputs/apk/debug/app-debug.apk
+npm install
+npm run tauri android init    # 首次生成 gen/android 脚手架（需 ANDROID_HOME）
+npm run tauri android build --debug
 ```
 
-技术栈：Kotlin + Jetpack Compose + OkHttp（HTTP/WebSocket）+ 原生 NSD（mDNS 发现）。
-最低支持 Android 8.0（API 26）。
+产物位于 `src-tauri/gen/android/app/build/outputs/apk/`。
+
+桌面窗口调试（同一套代码，快速迭代）：
+
+```bash
+npm run tauri dev
+```
+
+技术栈：Tauri v2 + Vue 3 + reqwest（HTTP）+ tauri-plugin-clipboard-manager。
+最低支持 Android 8.0（API 26）。v1 为前台轮询同步（3 秒间隔），后台实时推送为后续版本。
+
+> 早期 Kotlin/Jetpack Compose 版本已被 Tauri 版取代（协议更一致、核心可复用）；
+> 历史实现见 fuyun_tools_m 仓库提交 `cce9651`。
 
 ## 协议简表（开发者参考）
 
