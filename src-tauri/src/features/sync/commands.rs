@@ -8,8 +8,13 @@ use crate::sync::Mutex;
 use std::sync::Arc;
 
 /// 启动同步服务（幂等）
+///
+/// 必须是 async 命令：`start()` 内部的 `tokio::net::TcpListener::from_std`
+/// 需要 Tokio reactor 上下文。同步命令执行在主线程上，调用它会 panic
+/// （"there is no reactor running"）并被全局 panic 钩子记录后直接退出进程。
+/// Tauri 的 async 命令运行在 async_runtime（tokio）上，天然满足该约束。
 #[tauri::command]
-pub fn start_sync(
+pub async fn start_sync(
     app: AppHandle,
     state: tauri::State<'_, Arc<Mutex<SharedAppState>>>,
 ) -> Result<SyncStatus, String> {

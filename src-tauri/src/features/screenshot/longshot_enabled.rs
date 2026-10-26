@@ -428,7 +428,7 @@ pub fn cancel_manual_longshot(session_id: u64, app: AppHandle) -> Result<(), Str
                     log::warn!("长截图 worker 线程退出异常: {:?}", e);
                 }
             }));
-            if let Err(_) = join_result {
+            if join_result.is_err() {
                 log::warn!("长截图 worker 线程 panic，已忽略");
             }
             clear_runtime_if_finished(session_id);
@@ -874,19 +874,17 @@ fn run_longshot_worker_inner(
                     }),
                 );
             }
-            if !stitched_segments.is_empty() {
-                if stitched_height > last_preview_stitched_height {
-                    if let Ok(stitched_mat) = concat_segments(&stitched_segments) {
-                        if let Ok(preview_base64) = mat_to_preview_base64(&stitched_mat, 300, 110) {
-                            let _ = app.emit(
-                                "manual-longshot-preview-updated",
-                                serde_json::json!({
-                                    "sessionId": current_session_id,
-                                    "previewBase64": preview_base64,
-                                }),
-                            );
-                            last_preview_stitched_height = stitched_height;
-                        }
+            if !stitched_segments.is_empty() && stitched_height > last_preview_stitched_height {
+                if let Ok(stitched_mat) = concat_segments(&stitched_segments) {
+                    if let Ok(preview_base64) = mat_to_preview_base64(&stitched_mat, 300, 110) {
+                        let _ = app.emit(
+                            "manual-longshot-preview-updated",
+                            serde_json::json!({
+                                "sessionId": current_session_id,
+                                "previewBase64": preview_base64,
+                            }),
+                        );
+                        last_preview_stitched_height = stitched_height;
                     }
                 }
             }
@@ -1453,7 +1451,7 @@ fn mat_to_preview_base64(
     let src_h = image_mat.rows();
     let scale_w = max_width as f64 / src_w as f64;
     let scale_h = max_height as f64 / src_h as f64;
-    let scale = scale_w.min(scale_h).min(1.0).max(0.01);
+    let scale = scale_w.min(scale_h).clamp(0.01, 1.0);
     let dst_w = ((src_w as f64) * scale).round().max(1.0) as i32;
     let dst_h = ((src_h as f64) * scale).round().max(1.0) as i32;
 

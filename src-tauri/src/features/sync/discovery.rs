@@ -18,7 +18,7 @@ pub fn advertise(port: u16, pc_name: &str) -> Option<ServiceDaemon> {
         }
     };
     let host_ip = lan_ip()?;
-    let host_name = sanitize_host_name(pc_name);
+    let host_name = mdns_host_name(pc_name);
     // 显式切片类型：泛型参数不会做数组→切片 unsize 强转
     let properties: &[(&str, &str)] = &[("name", pc_name), ("ver", super::SYNC_PROTOCOL_VERSION)];
     let service = match ServiceInfo::new(
@@ -52,6 +52,13 @@ pub(crate) fn lan_ip() -> Option<std::net::IpAddr> {
     let socket = std::net::UdpSocket::bind("0.0.0.0:0").ok()?;
     socket.connect("8.8.8.8:80").ok()?;
     socket.local_addr().ok().map(|addr| addr.ip())
+}
+
+/// 构造 mDNS 主机名：sanitize 后的名字 + ".local." 后缀。
+/// mdns-sd 的 `check_hostname` 强制要求以 ".local." 结尾，否则服务注册失败
+/// （2026-10-26 修复：此前直接传 sanitize 结果导致 "Hostname must end with '.local.'"）。
+fn mdns_host_name(pc_name: &str) -> String {
+    format!("{}.local.", sanitize_host_name(pc_name))
 }
 
 /// mDNS 主机名只允许 ASCII 字母数字和连字符
@@ -88,6 +95,19 @@ mod tests {
         // 超长截断
         let long = "a".repeat(50);
         assert_eq!(sanitize_host_name(&long).len(), 32);
+    }
+
+    #[test]
+    fn test_mdns_host_name_ends_with_local() {
+        // mdns-sd check_hostname：必须以 ".local." 结尾，且不能恰好等于 ".local."
+        assert_eq!(mdns_host_name("My PC"), "my-pc.local.");
+        assert_eq!(mdns_host_name("DESKTOP-ABC123"), "desktop-abc123.local.");
+        assert_eq!(mdns_host_name("电脑"), "fuyun-pc.local.");
+        assert_eq!(mdns_host_name("---"), "fuyun-pc.local.");
+        for name in ["My PC", "", "---", "电脑"] {
+            assert_ne!(mdns_host_name(name), ".local.");
+            assert!(mdns_host_name(name).ends_with(".local."));
+        }
     }
 
     #[test]

@@ -324,3 +324,22 @@ fn load_or_create_token(app: &AppHandle) -> Result<String, String> {
     log::info!("同步令牌已生成并保存");
     Ok(token)
 }
+
+#[cfg(test)]
+mod tests {
+    /// 回归测试（2026-10-26 闪退事故）：`start_sync` 原为同步 Tauri 命令，
+    /// 在主线程调用 `tokio::net::TcpListener::from_std` 时因无 Tokio reactor
+    /// 而 panic（"there is no reactor running"），全局 panic 钩子记录后进程
+    /// 直接退出——用户点「启动同步服务」即闪退。
+    /// 修复：命令改为 async，在 Tauri async runtime（tokio）上执行。
+    /// 本测试锁定核心约束：from_std 在 runtime 上下文内可用。
+    #[test]
+    fn from_std_listener_works_inside_tauri_async_runtime() {
+        tauri::async_runtime::block_on(async {
+            let std_listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+            std_listener.set_nonblocking(true).expect("set_nonblocking");
+            let _tokio_listener =
+                tokio::net::TcpListener::from_std(std_listener).expect("from_std in runtime ctx");
+        });
+    }
+}

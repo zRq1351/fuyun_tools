@@ -1,5 +1,10 @@
 @echo off
 set "TRIPLET=%~1"
+rem 把 triplet 传给 vcpkg crate（opencv 构建脚本通过它探测库）。
+rem 不设 VCPKGRS_TRIPLET 时，vcpkg crate 见到 VCPKGRS_DYNAMIC 已设置就会选择
+rem 动态 x64-windows triplet，导致 exe 运行时依赖 opencv_*.dll。
+rem 与重构前的 src/tauri-build.bat 行为保持一致（静态链接、独立运行）。
+if defined TRIPLET set "VCPKGRS_TRIPLET=%TRIPLET%"
 set "VCPKGRS_DYNAMIC=%~2"
 set "OPENCV_MSVC_CRT=%~3"
 set "HAS_OPENCV=0"
