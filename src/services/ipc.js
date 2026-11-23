@@ -167,6 +167,11 @@ export const IPC_COMMANDS = {
     GET_SYNC_STATUS: 'get_sync_status',
     REGENERATE_SYNC_PAIRING_CODE: 'regenerate_sync_pairing_code',
     UNPAIR_SYNC_DEVICE: 'unpair_sync_device',
+
+    // 手机投屏（内嵌 scrcpy）
+    MIRROR_START: 'mirror_start',
+    MIRROR_STOP: 'mirror_stop',
+    MIRROR_STATUS: 'mirror_status',
     SAVE_SCREENSHOT_TO_PATH: 'save_screenshot_to_path',
     EXPORT_SCREENSHOT_TO_PATH: 'export_screenshot_to_path',
     COPY_SCREENSHOT_TO_CLIPBOARD: 'copy_screenshot_to_clipboard',
@@ -665,6 +670,12 @@ export const SyncService = {
     getStatus: () => ipcInvoke(IPC_COMMANDS.GET_SYNC_STATUS),
     regeneratePairingCode: () => ipcInvoke(IPC_COMMANDS.REGENERATE_SYNC_PAIRING_CODE),
     unpairDevice: () => ipcInvoke(IPC_COMMANDS.UNPAIR_SYNC_DEVICE),
+}
+
+export const MirrorService = {
+    start: () => ipcInvoke(IPC_COMMANDS.MIRROR_START),
+    stop: () => ipcInvoke(IPC_COMMANDS.MIRROR_STOP),
+    getStatus: () => ipcInvoke(IPC_COMMANDS.MIRROR_STATUS),
 };
 
 export const BackupService = {

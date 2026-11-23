@@ -95,3 +95,12 @@ The following files must be included in application package/installer or an equi
 - License: Check upstream repository for exact license (typically MIT or Apache 2.0)
 - Distribution in this application: Rust library providing OCR functionality by integrating PaddleOCR models with MNN inference engine
 - Features used: `build-mnn-from-source`
+
+## scrcpy (v5.0.1)
+
+- 来源: https://github.com/Genymobile/scrcpy
+- 许可证: Apache License 2.0（全文见 scrcpy_LICENSE）
+- 用途: 内嵌 scrcpy-server 实现手机投屏（adb.exe 来自 Android platform-tools，Apache License 2.0）
+- 版权: Copyright (C) Genymobile
+
+本产品基于 scrcpy（Apache License 2.0）修改/集成，未修改其源码，仅以原始 server 形态分发。

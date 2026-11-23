@@ -93,6 +93,22 @@
       <p>{{ $t('settings.sync.howToStep3') }}</p>
       <p>{{ $t('settings.sync.howToStep4') }}</p>
     </div>
+
+    <!-- 手机投屏入口 -->
+    <div class="mirror-entry">
+      <h4>手机投屏</h4>
+      <p class="hint">
+        将手机画面实时投屏到电脑，并支持鼠标点击、滑动等反向控制。
+        需要用 USB 数据线连接手机并授权调试（首次会推送投屏组件到手机）。
+      </p>
+      <el-button
+        type="primary"
+        :loading="mirrorStarting"
+        @click="onStartMirror"
+      >
+        开启投屏
+      </el-button>
+    </div>
   </div>
 </template>
 
@@ -100,10 +116,22 @@
 import {computed, onMounted, onUnmounted, reactive, ref} from 'vue'
 import {useI18n} from 'vue-i18n'
 import {ElMessage, ElMessageBox} from 'element-plus'
-import {SyncService} from '../../../services/ipc'
+import {SyncService, MirrorService} from '../../../services/ipc'
 import {parseErrorMessage} from '../../../utils/errorHandler'
 
 const {t} = useI18n()
+const mirrorStarting = ref(false)
+
+async function onStartMirror() {
+  mirrorStarting.value = true
+  try {
+    await MirrorService.start()
+  } catch (e) {
+    ElMessage.error({message: String(e), duration: 5000})
+  } finally {
+    mirrorStarting.value = false
+  }
+}
 
 const DEFAULT_STATUS = {
     running: false,
@@ -303,5 +331,22 @@ onUnmounted(() => {
   margin: 4px 0;
   color: var(--el-text-color-regular);
   font-size: 13px;
+}
+
+.mirror-entry {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px dashed var(--el-border-color);
+}
+
+.mirror-entry h4 {
+  margin: 0 0 8px;
+}
+
+.mirror-entry .hint {
+  margin: 0 0 12px;
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+  line-height: 1.6;
 }
 </style>

@@ -34,6 +34,10 @@ export default [
                 miniIcon: 'readonly',
                 ResizeObserver: 'readonly',
                 AbortController: 'readonly',
+                // WebCodecs / WebSocket（手机投屏页）
+                WebSocket: 'readonly',
+                VideoDecoder: 'readonly',
+                EncodedVideoChunk: 'readonly',
                 // DOM types
                 Element: 'readonly',
                 HTMLElement: 'readonly',

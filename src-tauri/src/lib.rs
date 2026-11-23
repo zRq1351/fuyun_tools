@@ -730,6 +730,10 @@ pub fn run() {
             get_sync_status,
             regenerate_sync_pairing_code,
             unpair_sync_device,
+            // 手机投屏命令
+            crate::features::mirror::commands::mirror_start,
+            crate::features::mirror::commands::mirror_stop,
+            crate::features::mirror::commands::mirror_status,
             resize_recording_toolbar,
             check_recording_ffmpeg,
             download_recording_ffmpeg,
@@ -867,6 +871,8 @@ pub fn run() {
                         BACKUP_SCHEDULER_STOP.store(true, Ordering::Release);
                         crate::services::clipboard_wakeup::stop_wake_dispatcher();
                         crate::features::screenshot::longshot::kill_active_ffmpeg_child();
+                        // 投屏会话随退出清理（杀 server 进程、撤 adb 隧道）
+                        crate::features::mirror::shutdown(app_handle);
                         log::info!("应用退出，已发送后台线程停止信号");
                     }
                     _ => {}
