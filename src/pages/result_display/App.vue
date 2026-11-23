@@ -212,11 +212,13 @@ import {computed, nextTick, onBeforeUnmount, onMounted, ref, watch} from 'vue'
 import {marked} from 'marked'
 import DOMPurify from 'dompurify'
 
+// 使用 DOMPurify 默认 URI 白名单（http/https/mailto/tel/ftp 等）。
+// 旧版自定义 ALLOWED_URI_REGEXP 的第三分支 [a-z+.-]+(?:[^a-z]|$) 会放行
+// javascript: / data: / vbscript:，导致消毒失效（XSS）。
 const DOMPURIFY_CONFIG = {
   USE_PROFILES: {html: true},
   ADD_ATTR: ['target'],
   FORBID_TAGS: ['style'],
-  ALLOWED_URI_REGEXP: /^(?:(?:https?|mailto):|[^a-z]|[a-z+.-]+(?:[^a-z]|$))/i,
 }
 import {getCurrentWindow} from '@tauri-apps/api/window'
 import {invoke} from '@tauri-apps/api/core'
@@ -564,6 +566,9 @@ const handleContentWheel = (target, event) => {
   }
 }
 
+/// 点击跳转前的二次防线：只放行安全协议，拦截残留的 javascript:/data: 等危险协议
+const isSafeHref = (href) => /^(https?:|mailto:|tel:)/i.test(href) || href.startsWith('#')
+
 const handleContentClick = (event) => {
   const anchor = event.target.closest('a')
   if (!anchor) return
@@ -571,6 +576,7 @@ const handleContentClick = (event) => {
   if (!href) return
   event.preventDefault()
   event.stopPropagation()
+  if (!isSafeHref(href)) return
   openUrl(href).catch(() => {
     window.open(href, '_blank', 'noopener,noreferrer')
   })

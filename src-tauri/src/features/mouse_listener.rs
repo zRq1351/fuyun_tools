@@ -342,8 +342,8 @@ fn handle_hook_event(
                         let state_guard = lock_arc_mutex(listener_state);
                         state_guard.is_visible
                             || state_guard.is_image_visible
-                            || state_guard.is_processing_selection
-                            || state_guard.is_updating_clipboard
+                            || state_guard.is_processing_selection()
+                            || state_guard.is_updating_clipboard()
                     };
                     if app_busy_or_visible {
                         log::debug!("当前应用窗口可见或正在处理回填，跳过划词检测触发");
@@ -929,8 +929,8 @@ fn run_detection_cycle(app_handle: &AppHandle, state: &Arc<Mutex<SharedAppState>
             state_guard.settings.selection_enabled,
             state_guard.is_visible
                 || state_guard.is_image_visible
-                || state_guard.is_processing_selection
-                || state_guard.is_updating_clipboard,
+                || state_guard.is_processing_selection()
+                || state_guard.is_updating_clipboard(),
         )
     };
 

@@ -1,7 +1,7 @@
 use crate::core::app_state::AppState as SharedAppState;
+use crate::core::app_state::ClipboardActivity;
 use crate::core::perf_metrics::record_perf_metric;
 use crate::sync::{lock_arc_mutex, Mutex};
-use crate::ui::commands_clipboard::recompute_selection_related_flags;
 use crate::utils::image_clipboard::is_fast_fill_verify_mode_enabled;
 use serde::Serialize;
 
@@ -138,15 +138,35 @@ pub(crate) fn last_writeback_result() -> Option<WriteBackExecutionResult> {
         .and_then(|slot| slot.lock().ok().and_then(|guard| guard.clone()))
 }
 
-pub(crate) fn begin_fill_sequence(state: &Arc<Mutex<SharedAppState>>, kind: FillKind) -> u64 {
-    let mut state_guard = lock_arc_mutex(state);
-    state_guard.selection_guard_epoch = state_guard.selection_guard_epoch.wrapping_add(1);
-    match kind {
-        FillKind::Text => state_guard.is_text_writeback_active = true,
-        FillKind::Image => state_guard.is_image_writeback_active = true,
+/// 回填活动位 RAII 守卫：Drop 时若本次回填仍是同类型最新请求则清理活动位。
+/// 早退路径（条目失效、`?` 返回错误、panic）不再泄漏 TextWriteback/ImageWriteback
+/// 活动位——否则剪贴板轮询与划词检测会整体静默失效。
+pub(crate) struct FillActivityGuard {
+    state: Arc<Mutex<SharedAppState>>,
+    kind: FillKind,
+    fill_seq: u64,
+}
+
+impl Drop for FillActivityGuard {
+    fn drop(&mut self) {
+        finish_fill_if_latest(&self.state, self.kind, self.fill_seq);
     }
-    recompute_selection_related_flags(&mut state_guard);
+}
+
+pub(crate) fn begin_fill_sequence(
+    state: &Arc<Mutex<SharedAppState>>,
+    kind: FillKind,
+) -> (u64, FillActivityGuard) {
+    let mut state_guard = lock_arc_mutex(state);
     match kind {
+        FillKind::Text => state_guard
+            .clipboard_activities
+            .insert(ClipboardActivity::TextWriteback),
+        FillKind::Image => state_guard
+            .clipboard_activities
+            .insert(ClipboardActivity::ImageWriteback),
+    }
+    let fill_seq = match kind {
         FillKind::Text => {
             state_guard.text_fill_seq = state_guard.text_fill_seq.wrapping_add(1);
             state_guard.text_fill_seq
@@ -155,7 +175,13 @@ pub(crate) fn begin_fill_sequence(state: &Arc<Mutex<SharedAppState>>, kind: Fill
             state_guard.image_fill_seq = state_guard.image_fill_seq.wrapping_add(1);
             state_guard.image_fill_seq
         }
-    }
+    };
+    let guard = FillActivityGuard {
+        state: state.clone(),
+        kind,
+        fill_seq,
+    };
+    (fill_seq, guard)
 }
 
 pub(crate) fn is_fill_latest(
@@ -175,25 +201,30 @@ pub(crate) fn finish_fill_if_latest(
     let mut guard = lock_arc_mutex(state);
     if kind.current_seq(&guard) == fill_seq {
         match kind {
-            FillKind::Text => guard.is_text_writeback_active = false,
-            FillKind::Image => guard.is_image_writeback_active = false,
+            FillKind::Text => guard
+                .clipboard_activities
+                .remove(ClipboardActivity::TextWriteback),
+            FillKind::Image => guard
+                .clipboard_activities
+                .remove(ClipboardActivity::ImageWriteback),
         }
-        recompute_selection_related_flags(&mut guard);
     }
 }
 
 pub(crate) fn interrupt_text_fill_flow(state: &Arc<Mutex<SharedAppState>>) {
     let mut state_guard = lock_arc_mutex(state);
     state_guard.text_fill_seq = state_guard.text_fill_seq.wrapping_add(1);
-    state_guard.is_text_writeback_active = false;
-    recompute_selection_related_flags(&mut state_guard);
+    state_guard
+        .clipboard_activities
+        .remove(ClipboardActivity::TextWriteback);
 }
 
 pub(crate) fn interrupt_image_fill_flow(state: &Arc<Mutex<SharedAppState>>) {
     let mut state_guard = lock_arc_mutex(state);
     state_guard.image_fill_seq = state_guard.image_fill_seq.wrapping_add(1);
-    state_guard.is_image_writeback_active = false;
-    recompute_selection_related_flags(&mut state_guard);
+    state_guard
+        .clipboard_activities
+        .remove(ClipboardActivity::ImageWriteback);
 }
 
 fn wait_for_fill_window_hidden(
@@ -223,11 +254,15 @@ pub(crate) fn spawn_fill_task<F>(
     state: Arc<Mutex<SharedAppState>>,
     fill_seq: u64,
     operation_id: u64,
+    fill_guard: FillActivityGuard,
     write_stage: F,
 ) where
     F: FnOnce(&AppHandle, &Arc<Mutex<SharedAppState>>) -> Result<(), String> + Send + 'static,
 {
     thread::spawn(move || {
+        // 守卫随任务结束而 Drop：无论成功、失败、stale 还是 panic，
+        // 都经由 finish_fill_if_latest 清理活动位（stale 时为幂等 no-op）
+        let _fill_guard = fill_guard;
         let started_at = std::time::Instant::now();
         let fast_path = kind == FillKind::Image && is_fast_fill_verify_mode_enabled();
         emit_writeback_phase(
@@ -308,6 +343,8 @@ pub(crate) fn spawn_fill_task<F>(
         let clipboard_started_at = std::time::Instant::now();
         let fill_result = write_stage(&app_handle, &state);
         if fill_result.is_ok() {
+            // 记录自写入指纹：防止轮询器把回填内容当新复制项入库/广播
+            lock_arc_mutex(&state).record_self_clipboard_write();
             record_writeback_stage_metric(
                 kind.label(),
                 "write_clipboard",

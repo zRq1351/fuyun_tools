@@ -1,4 +1,5 @@
 use crate::core::app_state::AppState as SharedAppState;
+use crate::core::app_state::ClipboardActivity;
 use crate::core::error::{to_frontend_error_string, AppError, ErrorCode};
 use crate::core::error_codes::AppErrorKind;
 use crate::core::perf_metrics::record_perf_metric;
@@ -297,13 +298,6 @@ pub(crate) fn is_screenshot_feature_enabled(state: &Arc<Mutex<SharedAppState>>) 
     guard.settings.screenshot_enabled
 }
 
-pub(crate) fn recompute_selection_related_flags(state: &mut SharedAppState) {
-    state.is_processing_selection = state.is_selection_capture_active
-        || state.is_text_writeback_active
-        || state.is_image_writeback_active;
-    state.is_updating_clipboard = state.is_text_writeback_active || state.is_image_writeback_active;
-}
-
 pub(crate) fn register_text_shortcut(
     app: &AppHandle,
     state: Arc<Mutex<SharedAppState>>,
@@ -392,31 +386,35 @@ pub(crate) fn register_screenshot_shortcut(app: &AppHandle, hot_key: &str) -> Re
     Ok(())
 }
 
-/// RAII guard：确保 panic 时也能重置 is_updating_clipboard 标志
-/// 保存进入时两个 writeback 标志的先前值并在 drop 时恢复，
-/// 避免并发在途的填充（由 begin_fill_sequence 置位）被本 guard 误清
-struct UpdatingClipboardGuard(Arc<Mutex<SharedAppState>>, bool, bool);
+/// RAII guard：确保 panic 时也能撤销"剪贴板维护"活动标记。
+/// 活动集合语义下各守卫只负责自己的活动位，无需保存/恢复其他标志。
+struct UpdatingClipboardGuard(Arc<Mutex<SharedAppState>>);
 
 impl Drop for UpdatingClipboardGuard {
     fn drop(&mut self) {
         let mut state_guard = lock_arc_mutex(&self.0);
-        state_guard.is_text_writeback_active = self.1;
-        state_guard.is_image_writeback_active = self.2;
-        recompute_selection_related_flags(&mut state_guard);
+        state_guard
+            .clipboard_activities
+            .remove(ClipboardActivity::ClipboardMaintenance);
     }
 }
 
-pub(crate) fn set_updating_clipboard(state: &Arc<Mutex<SharedAppState>>, updating: bool) {
-    let mut state_guard = lock_arc_mutex(state);
-    if updating {
-        // 显式置位，让轮询在删除+回填窗口期内跳过
-        state_guard.is_updating_clipboard = true;
-        state_guard.is_processing_selection = true;
-    } else {
-        state_guard.is_text_writeback_active = false;
-        state_guard.is_image_writeback_active = false;
-        recompute_selection_related_flags(&mut state_guard);
+pub(crate) fn with_updating_clipboard<T, F>(
+    state: &Arc<Mutex<SharedAppState>>,
+    operation: F,
+) -> Result<T, String>
+where
+    F: FnOnce() -> Result<T, String>,
+{
+    // 标记"剪贴板维护"活动，让轮询在删除+回填窗口期内跳过
+    {
+        let mut state_guard = lock_arc_mutex(state);
+        state_guard
+            .clipboard_activities
+            .insert(ClipboardActivity::ClipboardMaintenance);
     }
+    let _guard = UpdatingClipboardGuard(state.clone());
+    operation()
 }
 
 pub(crate) fn get_clipboard_manager_arc(
@@ -581,26 +579,6 @@ where
     }
 }
 
-pub(crate) fn with_updating_clipboard<T, F>(
-    state: &Arc<Mutex<SharedAppState>>,
-    operation: F,
-) -> Result<T, String>
-where
-    F: FnOnce() -> Result<T, String>,
-{
-    // 记录进入前的 writeback 标志，drop 时恢复（不清除并发在途的填充标志）
-    let prev = {
-        let guard = lock_arc_mutex(state);
-        (
-            guard.is_text_writeback_active,
-            guard.is_image_writeback_active,
-        )
-    };
-    set_updating_clipboard(state, true);
-    let _guard = UpdatingClipboardGuard(state.clone(), prev.0, prev.1);
-    operation()
-}
-
 pub(crate) fn try_replace_text_clipboard_after_remove(
     state: &Arc<Mutex<SharedAppState>>,
     app: &AppHandle,
@@ -624,6 +602,8 @@ pub(crate) fn try_replace_text_clipboard_after_remove(
         let manager = lock_arc_mutex(&manager_arc);
         if let Err(e) = manager.set_clipboard_content(app, &next) {
             log::warn!("删除文本后写入下一条到剪贴板失败: {}", e);
+        } else {
+            lock_arc_mutex(state).record_self_clipboard_write();
         }
     }
 }
@@ -654,6 +634,8 @@ pub(crate) fn try_replace_image_clipboard_after_remove(
     if let Some(image) = next_image {
         if let Err(e) = ImageClipboardManager::write_clipboard_image(app, &image) {
             log::warn!("删除图片后写入下一张到剪贴板失败: {}", e);
+        } else {
+            lock_arc_mutex(state).record_self_clipboard_write();
         }
     }
 }
@@ -664,7 +646,7 @@ pub(crate) fn execute_select_and_fill_text(
     app: AppHandle,
 ) -> Result<String, String> {
     let item_id = request.item_id;
-    let fill_seq = begin_fill_sequence(&state, FillKind::Text);
+    let (fill_seq, fill_guard) = begin_fill_sequence(&state, FillKind::Text);
     let operation_id = request.op_id.unwrap_or(fill_seq);
     let manager_arc = get_clipboard_manager_arc(&state);
 
@@ -685,6 +667,7 @@ pub(crate) fn execute_select_and_fill_text(
         state,
         fill_seq,
         operation_id,
+        fill_guard,
         move |app_handle, state_ref| {
             let _ = state_ref;
             let manager = lock_arc_mutex(&manager_arc_for_fill);
@@ -995,7 +978,7 @@ pub(crate) fn execute_select_and_fill_image_by_id(
     app: AppHandle,
 ) -> Result<(), String> {
     let item_id = request.item_id;
-    let fill_seq = begin_fill_sequence(&state, FillKind::Image);
+    let (fill_seq, fill_guard) = begin_fill_sequence(&state, FillKind::Image);
     let operation_id = request.op_id.unwrap_or(fill_seq);
     let manager_arc = get_image_clipboard_manager_arc(&state);
 
@@ -1007,6 +990,7 @@ pub(crate) fn execute_select_and_fill_image_by_id(
         state,
         fill_seq,
         operation_id,
+        fill_guard,
         move |app_handle, state_ref| {
             let prepare_started_at = std::time::Instant::now();
             let image = {

@@ -23,7 +23,6 @@ struct PersistState {
     save_completed: bool,
 }
 
-#[derive(Clone)]
 pub struct ClipboardManager {
     history: Arc<Mutex<Vec<String>>>,
     history_fingerprints: Arc<Mutex<Vec<(usize, u64)>>>,
@@ -38,6 +37,32 @@ pub struct ClipboardManager {
     max_items: usize,
     grouped_items_protected_from_limit: bool,
     bloom_filter: Arc<ParkingMutex<BloomFilter>>,
+    /// 仅权威实例（new() 创建、AppState/恢复流程持有）Drop 时触发退出落盘。
+    /// 命令路径 clone 出来的薄拷贝析构不应触发"全量落盘 + 最长 5s 阻塞"。
+    persist_on_drop: bool,
+}
+
+impl Clone for ClipboardManager {
+    /// 克隆只复制共享句柄，`persist_on_drop` 置 false：
+    /// 退出落盘职责始终归于权威实例，避免克隆析构时在 async worker
+    /// 上阻塞等待 persist 线程（最长 5s）并造成写放大。
+    fn clone(&self) -> Self {
+        Self {
+            history: self.history.clone(),
+            history_fingerprints: self.history_fingerprints.clone(),
+            fingerprint_index: self.fingerprint_index.clone(),
+            exact_index_cache: self.exact_index_cache.clone(),
+            history_cache_dirty: self.history_cache_dirty.clone(),
+            persist_state: self.persist_state.clone(),
+            categories: self.categories.clone(),
+            category_list: self.category_list.clone(),
+            pinned_items: self.pinned_items.clone(),
+            max_items: self.max_items,
+            grouped_items_protected_from_limit: self.grouped_items_protected_from_limit,
+            bloom_filter: self.bloom_filter.clone(),
+            persist_on_drop: false,
+        }
+    }
 }
 
 const LONG_TEXT_DEDUP_THRESHOLD: usize = 4000;
@@ -330,6 +355,7 @@ impl ClipboardManager {
             max_items,
             grouped_items_protected_from_limit,
             bloom_filter: Arc::new(ParkingMutex::new(bloom_filter)),
+            persist_on_drop: true,
         }
     }
 
@@ -1276,8 +1302,11 @@ fn is_expected_non_text_clipboard_error(msg: &str) -> bool {
 }
 
 impl Drop for ClipboardManager {
-    /// 析构时自动保存
+    /// 析构时自动保存（仅权威实例；克隆析构不落盘，见 [`ClipboardManager::clone`]）
     fn drop(&mut self) {
+        if !self.persist_on_drop {
+            return;
+        }
         if let Err(e) = self.save_history_on_exit() {
             log::error!("程序退出时保存历史记录失败: {}", e);
         }

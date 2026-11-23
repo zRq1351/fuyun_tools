@@ -415,7 +415,6 @@ pub struct RemovedImageInfo {
 /// Lock ordering: when acquiring multiple locks, always follow:
 /// `history` → `signature_index` → `categories` → `category_list` → `pinned_items` → `pending_images`
 /// This prevents deadlocks. All methods that need multiple locks MUST respect this order.
-#[derive(Clone)]
 pub struct ImageClipboardManager {
     history: Arc<Mutex<Vec<ImageHistoryItem>>>,
     signature_index: Arc<Mutex<HashMap<String, usize>>>,
@@ -434,6 +433,35 @@ pub struct ImageClipboardManager {
     current_memory_usage: Arc<AtomicU64>,
     dynamic_memory_budget: Arc<AtomicU64>,
     last_memory_check: Arc<AtomicU64>,
+    /// 仅权威实例（new() 创建、AppState/恢复流程持有）Drop 时触发退出落盘。
+    /// 命令路径 clone 出来的薄拷贝析构不应重复触发落盘等待。
+    persist_on_drop: bool,
+}
+
+impl Clone for ImageClipboardManager {
+    /// 克隆只复制共享句柄，`persist_on_drop` 置 false：
+    /// 退出落盘职责始终归于权威实例，避免命令路径克隆析构时重复落盘。
+    fn clone(&self) -> Self {
+        Self {
+            history: self.history.clone(),
+            signature_index: self.signature_index.clone(),
+            signature_index_dirty: self.signature_index_dirty.clone(),
+            categories: self.categories.clone(),
+            category_list: self.category_list.clone(),
+            image_tags: self.image_tags.clone(),
+            pinned_items: self.pinned_items.clone(),
+            pending_images: self.pending_images.clone(),
+            full_res_lru: self.full_res_lru.clone(),
+            persist_tx: self.persist_tx.clone(),
+            max_items: self.max_items,
+            image_disk_limit_bytes: self.image_disk_limit_bytes,
+            grouped_items_protected_from_limit: self.grouped_items_protected_from_limit,
+            current_memory_usage: self.current_memory_usage.clone(),
+            dynamic_memory_budget: self.dynamic_memory_budget.clone(),
+            last_memory_check: self.last_memory_check.clone(),
+            persist_on_drop: false,
+        }
+    }
 }
 
 impl ImageClipboardManager {
@@ -485,6 +513,7 @@ impl ImageClipboardManager {
                 calculate_initial_memory_budget() as u64
             )),
             last_memory_check: Arc::new(AtomicU64::new(0)),
+            persist_on_drop: true,
         };
 
         manager.start_memory_monitor();
@@ -2170,7 +2199,11 @@ pub fn get_image_persist_queue_metrics_snapshot() -> ImagePersistQueueMetrics {
 }
 
 impl Drop for ImageClipboardManager {
+    /// 析构时保存（仅权威实例；克隆析构不落盘，见 [`ImageClipboardManager::clone`]）
     fn drop(&mut self) {
+        if !self.persist_on_drop {
+            return;
+        }
         if let Err(e) = self.save_history_on_exit() {
             log::error!("程序退出时保存图片历史记录失败: {}", e);
         }

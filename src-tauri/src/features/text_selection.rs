@@ -210,6 +210,7 @@ const CAPTURE_RETRY_MAX_DURATION: Duration = Duration::from_millis(600);
 const CAPTURE_RETRY_INTERVAL: Duration = Duration::from_millis(10);
 
 use crate::core::app_state::AppState as SharedAppState;
+use crate::core::app_state::ClipboardActivity;
 use crate::utils::utils_helpers::now_unix_ms_u64;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use tauri::image::Image;
@@ -238,7 +239,6 @@ pub fn clear_manual_copy_flag() {
 
 struct SelectionProcessingGuard {
     state: Arc<Mutex<SharedAppState>>,
-    epoch: u64,
 }
 
 impl SelectionProcessingGuard {
@@ -247,28 +247,27 @@ impl SelectionProcessingGuard {
         if !guard.settings.selection_enabled {
             return None;
         }
-        if guard.is_processing_selection {
+        // 任何剪贴板活动进行中都不启动划词捕获：
+        // 避免捕获流程踩掉同步写入/回填的防回环守卫
+        if !guard.clipboard_activities.is_empty() {
             return None;
         }
-        guard.selection_guard_epoch = guard.selection_guard_epoch.wrapping_add(1);
-        let epoch = guard.selection_guard_epoch;
-        guard.is_selection_capture_active = true;
-        guard.is_processing_selection = true;
-        guard.is_updating_clipboard = false;
+        guard
+            .clipboard_activities
+            .insert(ClipboardActivity::SelectionCapture);
         drop(guard);
-        Some(Self { state, epoch })
+        Some(Self { state })
     }
 }
 
 impl Drop for SelectionProcessingGuard {
     fn drop(&mut self) {
         let mut state = lock_arc_mutex(&self.state);
-        if state.selection_guard_epoch == self.epoch {
-            state.is_selection_capture_active = false;
-            state.is_processing_selection = false;
-            state.is_updating_clipboard =
-                state.is_text_writeback_active || state.is_image_writeback_active;
-        }
+        // 只移除自己插入的活动；捕获期间叠加的其他活动
+        // （回填/维护）由各自的守卫负责清理，互不干扰
+        state
+            .clipboard_activities
+            .remove(ClipboardActivity::SelectionCapture);
         // 清除手动复制标志，避免影响后续操作
         clear_manual_copy_flag();
     }
@@ -644,6 +643,9 @@ fn restore_clipboard_snapshot(
             if let Err(e) = result {
                 log::error!("恢复文本剪贴板内容最终失败: {}", e);
             } else {
+                // 记录自写入指纹，防止轮询器把恢复的原始内容当新复制项入库
+                let state = app_handle.state::<Arc<Mutex<SharedAppState>>>();
+                lock_arc_mutex(state.inner()).record_self_clipboard_write();
                 log::debug!("已恢复原始文本剪贴板内容");
             }
         }
@@ -661,6 +663,9 @@ fn restore_clipboard_snapshot(
             if let Err(e) = result {
                 log::error!("恢复图片剪贴板内容最终失败: {}", e);
             } else {
+                // 记录自写入指纹，防止轮询器把恢复的原始内容当新复制项入库
+                let state = app_handle.state::<Arc<Mutex<SharedAppState>>>();
+                lock_arc_mutex(state.inner()).record_self_clipboard_write();
                 log::debug!("已恢复原始图片剪贴板内容");
             }
         }
