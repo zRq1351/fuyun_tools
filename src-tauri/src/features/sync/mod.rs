@@ -14,7 +14,7 @@ pub mod discovery;
 pub mod pairing;
 pub mod server;
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, OnceLock};
 
 use serde::Serialize;
@@ -136,9 +136,41 @@ pub fn broadcast_text(text: &str) {
     });
 }
 
+/// 图片广播抑制计数。
+///
+/// 手机推来的图片要进本机图片历史，而 `ImageClipboardManager::add_rgba_image_with_source_blob`
+/// 内部会调用 [`broadcast_image`] 把新图片推给对端——若不抑制，刚收到的图片会被原样推回手机。
+static IMAGE_BROADCAST_SUPPRESS: AtomicU32 = AtomicU32::new(0);
+
+/// RAII 守卫：作用域内抑制图片广播，panic 也能恢复计数
+pub struct ImageBroadcastSuppressGuard;
+
+impl ImageBroadcastSuppressGuard {
+    pub fn new() -> Self {
+        IMAGE_BROADCAST_SUPPRESS.fetch_add(1, Ordering::SeqCst);
+        Self
+    }
+}
+
+impl Default for ImageBroadcastSuppressGuard {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Drop for ImageBroadcastSuppressGuard {
+    fn drop(&mut self) {
+        IMAGE_BROADCAST_SUPPRESS.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
 /// 钩子：新剪贴板图片（由 image_clipboard 入库成功后调用）
 pub fn broadcast_image(path: &str, width: u32, height: u32) {
     if path.is_empty() {
+        return;
+    }
+    if IMAGE_BROADCAST_SUPPRESS.load(Ordering::SeqCst) > 0 {
+        log::debug!("图片广播已被抑制（来自手机同步，不回传对端）");
         return;
     }
     push_and_broadcast(SyncMessage::Image {

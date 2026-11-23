@@ -342,9 +342,13 @@ fn write_clipboard_image(
     crate::utils::image_clipboard::ImageClipboardManager::write_clipboard_image(app, &tauri_image)?;
     lock_arc_mutex(app_state).record_self_clipboard_write();
 
-    // 图片轮询器会因自写入指纹丢弃这次变化，这里显式补登图片历史卡片
+    // 图片轮询器会因自写入指纹丢弃这次变化，这里显式补登图片历史卡片。
+    // 入库过程内部会触发 broadcast_image 钩子，必须抑制，否则刚收到的图片会被推回手机。
     let manager_arc = { lock_arc_mutex(app_state).image_clipboard_manager.clone() };
-    lock_arc_mutex(&manager_arc).add_rgba_image_with_source_blob(raw, width, height, None);
+    {
+        let _no_echo = crate::features::sync::ImageBroadcastSuppressGuard::new();
+        lock_arc_mutex(&manager_arc).add_rgba_image_with_source_blob(raw, width, height, None);
+    }
     crate::services::image_clipboard_manager::emit_image_history_payload(app, app_state.clone());
     Ok(())
 }
