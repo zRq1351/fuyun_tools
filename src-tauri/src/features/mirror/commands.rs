@@ -33,14 +33,27 @@ fn resource_dir(app: &AppHandle) -> Result<std::path::PathBuf, String> {
 
 fn jar_path(app: &AppHandle) -> Result<std::path::PathBuf, String> {
     let dir = resource_dir(app)?;
-    let p = dir
-        .join("third_party")
-        .join("scrcpy")
-        .join(format!("scrcpy-server-v{}", SCRCPY_VERSION));
-    if !p.exists() {
-        return Err(format!("scrcpy-server 未随包分发: {}", p.display()));
+    // 打包器把 tauri.conf.json 里的 "../third_party/*" 安装到 resource_dir/_up_/third_party/
+    // （参照 _up_/docs 的既有布局）；开发态则可能直接是 resource_dir/third_party/。
+    let candidates = [
+        dir.join("_up_").join("third_party").join("scrcpy"),
+        dir.join("third_party").join("scrcpy"),
+    ];
+    let name = format!("scrcpy-server-v{}", SCRCPY_VERSION);
+    for base in &candidates {
+        let p = base.join(&name);
+        if p.exists() {
+            return Ok(p);
+        }
     }
-    Ok(p)
+    Err(format!(
+        "scrcpy-server 未随包分发（已探测: {}）",
+        candidates
+            .iter()
+            .map(|b| b.join(&name).display().to_string())
+            .collect::<Vec<_>>()
+            .join("; ")
+    ))
 }
 
 /// 启动（或复用）投屏会话，并打开投屏窗口。

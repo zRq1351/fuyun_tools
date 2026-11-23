@@ -14,9 +14,12 @@ use std::time::Duration;
 pub fn resolve_adb(app: Option<&tauri::AppHandle>) -> Result<PathBuf, String> {
     if let Some(app) = app {
         if let Ok(dir) = app.path().resource_dir() {
+            // 打包器把 "../third_party/*" 安装到 resource_dir/_up_/third_party/；
+            // 开发态可能是 resource_dir/third_party/。
             let candidates = [
-                dir.join("adb.exe"),
+                dir.join("_up_").join("third_party").join("scrcpy").join("adb.exe"),
                 dir.join("third_party").join("scrcpy").join("adb.exe"),
+                dir.join("adb.exe"),
             ];
             for cand in candidates {
                 if cand.exists() {
