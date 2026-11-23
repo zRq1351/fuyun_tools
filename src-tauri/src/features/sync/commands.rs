@@ -23,8 +23,8 @@ pub async fn start_sync(
 
 /// 停止同步服务
 #[tauri::command]
-pub fn stop_sync() -> Result<(), String> {
-    stop();
+pub fn stop_sync(app: AppHandle) -> Result<(), String> {
+    stop(&app);
     Ok(())
 }
 

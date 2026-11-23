@@ -236,6 +236,8 @@ pub fn run() {
             rebuild_tray_menu(app_handle, state_arc.clone());
             start_auto_backup_scheduler(app_handle.clone(), state_arc.clone());
             crate::ui::window_manager::start_idle_window_gc(app_handle.clone());
+            // 上次退出前开启过手机同步 → 随应用启动自动恢复（不再依赖打开设置页）
+            crate::features::sync::auto_start_if_enabled(app_handle, state_arc.clone());
             let state_clone = state_arc.clone();
             let app_handle_clone = app_handle.clone();
             // 优化：一次性批量获取所有需要的设置字段，减少锁获取次数

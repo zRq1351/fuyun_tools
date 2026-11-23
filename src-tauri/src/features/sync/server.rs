@@ -17,6 +17,7 @@ use tauri::AppHandle;
 use super::pairing;
 use super::{lock, HistoryItem, SyncMessage, SyncState, SYNC_PROTOCOL_VERSION};
 use crate::core::app_state::AppState as SharedAppState;
+use crate::core::app_state::ClipboardActivity;
 use crate::sync::{lock_arc_mutex, Mutex};
 use tauri_plugin_clipboard_manager::ClipboardExt;
 
@@ -156,7 +157,7 @@ async fn push_clip(
     let app_state = s.app_state.clone();
     let result = tokio::task::spawn_blocking(move || match req.kind {
         ClipKind::Text { text } => write_clipboard_text(&app, &app_state, &text),
-        ClipKind::Image { image_base64 } => write_clipboard_image(&app, &image_base64),
+        ClipKind::Image { image_base64 } => write_clipboard_image(&app, &app_state, &image_base64),
     })
     .await
     .map_err(|e| {
@@ -268,8 +269,26 @@ async fn handle_socket(
 
 // ---------- 剪贴板写入（带防回环守卫） ----------
 
-/// 写文本到 PC 剪贴板。设置 `is_updating_clipboard` 守卫，
-/// 避免本机剪贴板轮询器把同步内容当作新复制项再次入库/广播（回环）。
+/// RAII 防回环守卫：标记"同步写入剪贴板"活动，
+/// 让本机剪贴板轮询器在写入窗口期内跳过（避免把同步内容当作新复制项再次入库/广播）。
+/// panic 时也能可靠撤销，不会把守卫泄漏成永久 true。
+struct SyncClipboardWriteGuard<'a>(&'a Arc<Mutex<SharedAppState>>);
+
+impl Drop for SyncClipboardWriteGuard<'_> {
+    fn drop(&mut self) {
+        let mut guard = lock_arc_mutex(self.0);
+        guard
+            .clipboard_activities
+            .remove(ClipboardActivity::SyncClipboardWrite);
+    }
+}
+
+/// 写文本到 PC 剪贴板。设置 `SyncClipboardWrite` 活动守卫避免回环，
+/// 并记录自写入指纹供轮询器回读时丢弃（活动位只挡写入瞬间，
+/// 押后事件仍会在守卫撤销后被消费，指纹比对才是最终防线）。
+///
+/// 指纹丢弃的同时必须显式入库：用户期望手机发来的文字出现在电脑端的
+/// 文字剪贴板卡片里（可信手再取用），只是不能再广播回手机。
 fn write_clipboard_text(
     app: &AppHandle,
     app_state: &Arc<Mutex<SharedAppState>>,
@@ -277,20 +296,32 @@ fn write_clipboard_text(
 ) -> Result<(), String> {
     {
         let mut guard = lock_arc_mutex(app_state);
-        guard.is_updating_clipboard = true;
+        guard
+            .clipboard_activities
+            .insert(ClipboardActivity::SyncClipboardWrite);
     }
-    let result = crate::services::clipboard_access_guard::with_clipboard_access_lock(|| {
+    let _write_guard = SyncClipboardWriteGuard(app_state);
+    crate::services::clipboard_access_guard::with_clipboard_access_lock(|| {
         app.clipboard().write_text(text).map_err(|e| e.to_string())
-    });
-    {
-        let mut guard = lock_arc_mutex(app_state);
-        guard.is_updating_clipboard = false;
-    }
-    result
+    })?;
+    lock_arc_mutex(app_state).record_self_clipboard_write();
+    crate::services::clipboard_manager::add_synced_to_clipboard_history(
+        app,
+        text.to_string(),
+        app_state.clone(),
+    );
+    Ok(())
 }
 
-/// 写图片到 PC 剪贴板（base64 → 解码 → tauri Image → 复用现有写入路径）
-fn write_clipboard_image(app: &AppHandle, image_base64: &str) -> Result<(), String> {
+/// 写图片到 PC 剪贴板（base64 → 解码 → tauri Image → 复用现有写入路径）。
+/// 与文本写入一致：SyncClipboardWrite 活动守卫 + 自写入指纹，防止
+/// 图片轮询器把手机推来的图片重复入库并广播回手机；
+/// 同时显式把图片补进本机图片历史，让用户在电脑端卡片里也能看到。
+fn write_clipboard_image(
+    app: &AppHandle,
+    app_state: &Arc<Mutex<SharedAppState>>,
+    image_base64: &str,
+) -> Result<(), String> {
     use base64::Engine;
     let bytes = base64::engine::general_purpose::STANDARD
         .decode(image_base64)
@@ -298,6 +329,22 @@ fn write_clipboard_image(app: &AppHandle, image_base64: &str) -> Result<(), Stri
     let decoded = image::load_from_memory(&bytes).map_err(|e| format!("图片解码失败: {}", e))?;
     let rgba = decoded.to_rgba8();
     let (width, height) = (rgba.width(), rgba.height());
-    let tauri_image = tauri::image::Image::new_owned(rgba.into_raw(), width, height);
-    crate::utils::image_clipboard::ImageClipboardManager::write_clipboard_image(app, &tauri_image)
+    let raw = rgba.into_raw();
+    // 剪贴板写入会消费 Image，历史入库还需要同一份像素，故先克隆一份
+    let tauri_image = tauri::image::Image::new_owned(raw.clone(), width, height);
+    {
+        let mut guard = lock_arc_mutex(app_state);
+        guard
+            .clipboard_activities
+            .insert(ClipboardActivity::SyncClipboardWrite);
+    }
+    let _write_guard = SyncClipboardWriteGuard(app_state);
+    crate::utils::image_clipboard::ImageClipboardManager::write_clipboard_image(app, &tauri_image)?;
+    lock_arc_mutex(app_state).record_self_clipboard_write();
+
+    // 图片轮询器会因自写入指纹丢弃这次变化，这里显式补登图片历史卡片
+    let manager_arc = { lock_arc_mutex(app_state).image_clipboard_manager.clone() };
+    lock_arc_mutex(&manager_arc).add_rgba_image_with_source_blob(raw, width, height, None);
+    crate::services::image_clipboard_manager::emit_image_history_payload(app, app_state.clone());
+    Ok(())
 }

@@ -4,7 +4,7 @@
 //! 1. PC 启动同步服务 → mDNS 广播 `_fuyun._tcp`（手机自动发现）+ 生成 6 位配对码
 //! 2. 手机输入配对码 → `POST /api/pair` 换取设备令牌
 //! 3. 双向同步：
-//!    - 手机 → PC：`POST /api/clip`（文本/图片）写入 PC 剪贴板（带 `is_updating_clipboard` 防回环）
+//!    - 手机 → PC：`POST /api/clip`（文本/图片）写入 PC 剪贴板（带 `SyncClipboardWrite` 活动守卫防回环）
 //!    - PC → 手机：剪贴板新内容经 `broadcast_text` / `broadcast_image` 钩子推给 WS 连接
 //!
 //! 模块划分：pairing（纯配对逻辑）/ server（HTTP+WS）/ discovery（mDNS）/ commands（Tauri 命令）
@@ -221,12 +221,16 @@ pub fn start(app: &AppHandle, app_state: Arc<Mutex<SharedAppState>>) -> Result<S
     *lock(&state.shutdown_tx) = Some(shutdown_tx);
 
     state.running.store(true, Ordering::SeqCst);
+    // 记录"启用中"标记：应用下次启动时据此自动恢复服务（stop 时删除）
+    if let Err(e) = set_enabled_flag(app, true) {
+        log::warn!("写入同步启用标记失败（下次启动不会自动恢复）: {}", e);
+    }
     log::info!("同步服务已启动: port={}, name={}", port, state.pc_name);
     Ok(status_snapshot(state))
 }
 
 /// 停止同步服务
-pub fn stop() {
+pub fn stop(app: &AppHandle) {
     let state = shared();
     if !state.running.load(Ordering::SeqCst) {
         return;
@@ -236,19 +240,44 @@ pub fn stop() {
     }
     *lock(&state.pairing_code) = None;
     state.running.store(false, Ordering::SeqCst);
+    // 用户主动停止 → 清除启用标记，下次启动不再自动恢复
+    if let Err(e) = set_enabled_flag(app, false) {
+        log::warn!("清除同步启用标记失败: {}", e);
+    }
     log::info!("同步服务已停止");
 }
 
-/// 吊销当前令牌并生成新配对码（手机需重新配对）
+/// 应用启动时自动恢复同步服务（仅当上次退出前处于启用状态）。
+///
+/// 此前服务只在前端设置页 mounted 时恢复——用户不打开设置页就等于没开，
+/// 是"电脑端看起来开了、手机却连不上"的常见诱因。
+/// `start()` 内部 `TcpListener::from_std` 需要 Tokio reactor，故在 async 任务中执行。
+pub fn auto_start_if_enabled(app: &AppHandle, app_state: Arc<Mutex<SharedAppState>>) {
+    let app = app.clone();
+    let enabled = enabled_flag_path(&app).map(|p| p.exists()).unwrap_or(false);
+    if !enabled {
+        log::info!("同步服务上次为关闭状态，跳过自动恢复");
+        return;
+    }
+    tauri::async_runtime::spawn(async move {
+        match start(&app, app_state) {
+            Ok(s) => log::info!("同步服务已随应用启动自动恢复: port={}", s.port),
+            Err(e) => log::error!("同步服务自动恢复失败: {}", e),
+        }
+    });
+}
+
+/// 吊销当前令牌并生成新配对码（手机需重新配对）。
+/// 吊销后立即轮换新令牌并落盘：否则 `pair` 取不到令牌恒返回 500，
+/// 且服务运行中 `start()` 会早退，用户将无法重新配对。
 pub fn unpair(app: &AppHandle) -> Result<(), String> {
     let state = shared();
-    *lock(&state.token) = None;
     let path = token_file_path(app)?;
-    if path.exists() {
-        std::fs::remove_file(&path).map_err(|e| format!("删除同步令牌文件失败: {}", e))?;
-    }
+    let new_token = pairing::generate_token();
+    std::fs::write(&path, &new_token).map_err(|e| format!("保存同步令牌失败: {}", e))?;
+    *lock(&state.token) = Some(new_token);
     *lock(&state.pairing_code) = Some(pairing::generate_pairing_code());
-    log::info!("同步设备已吊销，等待重新配对");
+    log::info!("同步设备已吊销，令牌已轮换，等待重新配对");
     Ok(())
 }
 
@@ -285,9 +314,16 @@ pub fn status() -> SyncStatus {
 
 fn status_snapshot(state: &SyncState) -> SyncStatus {
     let now = pairing::now_ms();
-    let code = lock(&state.pairing_code);
+    let running = state.running.load(Ordering::SeqCst);
+    // 运行中且配对码缺失/过期 → 自动续期。
+    // 面板每 2s 轮询本快照，保证用户看到的码始终可用——此前码只在启动时生成
+    // 一次，5 分钟过期后配对恒 403（2026-10-26 06:15 日志证实为手机配对失败主因）。
+    let mut code = lock(&state.pairing_code);
+    if running && code.as_ref().is_none_or(|c| !c.is_valid(now)) {
+        *code = Some(pairing::generate_pairing_code());
+    }
     SyncStatus {
-        running: state.running.load(Ordering::SeqCst),
+        running,
         port: *lock(&state.port),
         local_ip: discovery::lan_ip().map(|ip| ip.to_string()),
         pc_name: state.pc_name.clone(),
@@ -299,15 +335,36 @@ fn status_snapshot(state: &SyncState) -> SyncStatus {
     }
 }
 
-// ---------- 令牌持久化 ----------
+// ---------- 令牌与启用标记持久化 ----------
 
-fn token_file_path(app: &AppHandle) -> Result<std::path::PathBuf, String> {
+fn app_data_dir(app: &AppHandle) -> Result<std::path::PathBuf, String> {
     let dir = app
         .path()
         .app_data_dir()
         .map_err(|e| format!("获取应用数据目录失败: {}", e))?;
     std::fs::create_dir_all(&dir).map_err(|e| format!("创建应用数据目录失败: {}", e))?;
-    Ok(dir.join("sync_token.txt"))
+    Ok(dir)
+}
+
+fn token_file_path(app: &AppHandle) -> Result<std::path::PathBuf, String> {
+    Ok(app_data_dir(app)?.join("sync_token.txt"))
+}
+
+/// 启用标记文件路径（存在 = 上次退出前同步处于启用状态）
+fn enabled_flag_path(app: &AppHandle) -> Result<std::path::PathBuf, String> {
+    Ok(app_data_dir(app)?.join("sync_enabled.flag"))
+}
+
+/// 写入/删除启用标记（best-effort，失败只记日志不阻断服务启停）
+fn set_enabled_flag(app: &AppHandle, enabled: bool) -> Result<(), String> {
+    let path = enabled_flag_path(app)?;
+    if enabled {
+        std::fs::write(&path, b"1").map_err(|e| format!("写入同步启用标记失败: {}", e))
+    } else if path.exists() {
+        std::fs::remove_file(&path).map_err(|e| format!("删除同步启用标记失败: {}", e))
+    } else {
+        Ok(())
+    }
 }
 
 fn load_or_create_token(app: &AppHandle) -> Result<String, String> {
@@ -327,6 +384,24 @@ fn load_or_create_token(app: &AppHandle) -> Result<String, String> {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
+    /// 构造独立 SyncState（不影响全局 shared()）
+    fn test_state() -> Arc<SyncState> {
+        let (tx, _rx) = broadcast::channel(BROADCAST_CAPACITY);
+        Arc::new(SyncState {
+            running: AtomicBool::new(false),
+            port: Mutex::new(SYNC_DEFAULT_PORT),
+            pairing_code: Mutex::new(None),
+            token: Mutex::new(None),
+            tx,
+            history: Mutex::new(Vec::new()),
+            shutdown_tx: Mutex::new(None),
+            last_error: Mutex::new(None),
+            pc_name: "test-pc".to_string(),
+        })
+    }
+
     /// 回归测试（2026-10-26 闪退事故）：`start_sync` 原为同步 Tauri 命令，
     /// 在主线程调用 `tokio::net::TcpListener::from_std` 时因无 Tokio reactor
     /// 而 panic（"there is no reactor running"），全局 panic 钩子记录后进程
@@ -341,5 +416,41 @@ mod tests {
             let _tokio_listener =
                 tokio::net::TcpListener::from_std(std_listener).expect("from_std in runtime ctx");
         });
+    }
+
+    /// 回归测试（2026-10-26 配对失败事故）：配对码只在服务启动时生成一次，
+    /// 5 分钟过期后配对恒 403——日志证实手机已到达 /api/pair 但配对失败。
+    /// 修复：status_snapshot 在运行中检测到码缺失/过期时自动续期。
+    #[test]
+    fn status_snapshot_renews_expired_pairing_code_while_running() {
+        let state = test_state();
+        let now = pairing::now_ms();
+
+        // 未运行：不生成码
+        let snap = status_snapshot(&state);
+        assert!(!snap.running);
+        assert!(snap.pairing_code.is_none());
+
+        // 运行中且码缺失 → 快照生成新码
+        state.running.store(true, Ordering::SeqCst);
+        let snap = status_snapshot(&state);
+        assert!(snap.pairing_code.is_some());
+        assert!(snap.pairing_expires_in_secs > 0);
+
+        // 运行中且码已过期 → 快照自动续期（旧码被替换）
+        *lock(&state.pairing_code) = Some(pairing::PairingCode {
+            code: "000000".to_string(),
+            expires_at_ms: now - 1,
+        });
+        let snap = status_snapshot(&state);
+        assert_ne!(snap.pairing_code.as_deref(), Some("000000"));
+        assert!(snap.pairing_expires_in_secs > 0);
+
+        // 运行中且码有效 → 不刷新（保持同一码，避免用户正在输入时换码）
+        let fresh = pairing::generate_pairing_code();
+        let fresh_code = fresh.code.clone();
+        *lock(&state.pairing_code) = Some(fresh);
+        let snap = status_snapshot(&state);
+        assert_eq!(snap.pairing_code.as_deref(), Some(fresh_code.as_str()));
     }
 }

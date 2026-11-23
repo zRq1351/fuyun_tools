@@ -38,6 +38,10 @@ pub fn start_clipboard_listener(app_handle: AppHandle, state: Arc<Mutex<AppState
     POLLER.start(
         move || {
             // on_event: 检测到剪贴板唤醒事件时处理
+            // 自写入指纹命中：回填/维护/同步写入/划词恢复的内容，不入库
+            if lock_arc_mutex(&state_for_event).is_self_clipboard_write() {
+                return;
+            }
             let current_content = read_clipboard_text(&app_for_event);
             if let Some(content) = current_content {
                 if !content.is_empty() {
@@ -51,10 +55,10 @@ pub fn start_clipboard_listener(app_handle: AppHandle, state: Arc<Mutex<AppState
             if !state_guard.settings.text_clipboard_enabled {
                 return false;
             }
-            if state_guard.is_updating_clipboard {
+            if state_guard.is_updating_clipboard() {
                 return false;
             }
-            let is_processing_selection = state_guard.is_processing_selection;
+            let is_processing_selection = state_guard.is_processing_selection();
             if is_processing_selection {
                 let allow = crate::features::text_selection::should_allow_clipboard_listener();
                 return allow;
@@ -80,7 +84,7 @@ pub fn set_clipboard_listener_enabled(
     }
 }
 
-/// 添加到剪贴板历史记录
+/// 添加到剪贴板历史记录（本机复制路径）
 pub fn add_to_clipboard_history(
     app_handle: &AppHandle,
     content: String,
@@ -91,9 +95,9 @@ pub fn add_to_clipboard_history(
     }
 
     // Single lock acquisition for all state reads to reduce contention
-    let (manager_arc, should_emit, allow) = {
+    let allow = {
         let state_guard = lock_arc_mutex(&state);
-        let is_processing = state_guard.is_processing_selection;
+        let is_processing = state_guard.is_processing_selection();
         let allow =
             is_processing && crate::features::text_selection::should_allow_clipboard_listener();
 
@@ -103,11 +107,7 @@ pub fn add_to_clipboard_history(
             return;
         }
 
-        (
-            state_guard.clipboard_manager.clone(),
-            state_guard.is_visible,
-            allow,
-        )
+        allow
     };
 
     if allow {
@@ -116,10 +116,51 @@ pub fn add_to_clipboard_history(
         crate::features::text_selection::clear_manual_copy_flag();
     }
 
+    record_history_entry(app_handle, content, &state, true);
+}
+
+/// 手机同步来的文本入库（手机 → 电脑）
+///
+/// 同步写入会命中自写入指纹、被剪贴板轮询器丢弃（那是防止回环广播的防线），
+/// 但用户在电脑端的历史卡片里应当看到这条内容，因此由同步服务显式入库。
+///
+/// `broadcast_to_peers = false`：内容本来就来自对端，再广播回去只会造成回环；
+/// 对端自己的卡片由手机 App 本地维护。
+pub fn add_synced_to_clipboard_history(
+    app_handle: &AppHandle,
+    content: String,
+    state: Arc<Mutex<AppState>>,
+) {
+    if content.trim().is_empty() {
+        return;
+    }
+    record_history_entry(app_handle, content, &state, false);
+}
+
+/// 真正写入历史 + 通知前端卡片。
+///
+/// `broadcast_to_peers` 区分来源：本机复制需要广播给已配对设备，
+/// 同步写入则不能广播（否则内容会在手机和电脑之间来回弹）。
+fn record_history_entry(
+    app_handle: &AppHandle,
+    content: String,
+    state: &Arc<Mutex<AppState>>,
+    broadcast_to_peers: bool,
+) {
+    let (manager_arc, should_emit) = {
+        let state_guard = lock_arc_mutex(state);
+        (
+            state_guard.clipboard_manager.clone(),
+            state_guard.is_visible,
+        )
+    };
+
     let payload = {
         let manager = lock_arc_mutex(&manager_arc);
-        // 手机同步：新剪贴板文本广播给已配对设备（同步服务未启动时为 no-op）
-        crate::features::sync::broadcast_text(&content);
+        if broadcast_to_peers {
+            // 手机同步：新剪贴板文本广播给已配对设备（同步服务未启动时为 no-op）
+            crate::features::sync::broadcast_text(&content);
+        }
         manager.add_to_history(content);
 
         if !should_emit {

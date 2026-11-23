@@ -26,6 +26,12 @@ export function useSettingsNav() {
 
     const activeTab = ref('clipboard')
     const isDevMode = __DEV_PANEL__
+    // 手机同步面板开关：false 时左侧导航不显示，跨页跳转事件也被
+    // sections 校验拦截（handleNavigateSettings / handleNavigateTab 均按
+    // sections 过滤）。恢复功能时改回 true 即可。
+    // 2026-11-18：连接问题根因已修复（安装包陈旧 + 配对码过期不续期），
+    // 恢复显示供用户实测。
+    const SYNC_PANEL_ENABLED = true
 
     const sections = computed(() => {
         const baseSections = [
@@ -82,14 +88,16 @@ export function useSettingsNav() {
                 label: t('settings.nav.diagnostic'),
                 description: t('settings.nav.diagnosticDesc'),
                 icon: WarningFilled
-            },
-            {
+            }
+        ]
+        if (SYNC_PANEL_ENABLED) {
+            baseSections.push({
                 key: 'sync',
                 label: t('settings.nav.sync'),
                 description: t('settings.nav.syncDesc'),
                 icon: Connection
-            }
-        ]
+            })
+        }
         if (isDevMode) {
             baseSections.push({
                 key: 'developer',

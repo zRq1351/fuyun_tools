@@ -266,10 +266,15 @@ pub fn start_image_clipboard_listener(app_handle: AppHandle, state: Arc<Mutex<Ap
 
     let app_for_event = app_handle.clone();
     let state_for_event = state.clone();
+    let state_for_poll = state.clone();
 
     IMAGE_POLLER.start(
         move || {
             // on_event: 检测到剪贴板唤醒事件时处理图片
+            // 自写入指纹命中：回填/维护/同步写入的内容，不入库
+            if lock_arc_mutex(&state_for_event).is_self_clipboard_write() {
+                return;
+            }
             log::debug!("[监听线程] 收到剪贴板变化事件");
             let image = ImageClipboardManager::read_clipboard_images_rgba(&app_for_event);
             match image {
@@ -342,11 +347,11 @@ pub fn start_image_clipboard_listener(app_handle: AppHandle, state: Arc<Mutex<Ap
         },
         move || {
             // on_poll: 每次轮询检查是否应该处理
-            let state_guard = lock_arc_mutex(&state_for_event);
+            let state_guard = lock_arc_mutex(&state_for_poll);
             if !state_guard.settings.image_clipboard_enabled {
                 return false;
             }
-            if state_guard.is_updating_clipboard || state_guard.is_processing_selection {
+            if state_guard.is_updating_clipboard() || state_guard.is_processing_selection() {
                 return false;
             }
             if capture::is_screenshot_in_progress() && !capture::peek_allow_image_clipboard_once() {
