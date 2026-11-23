@@ -36,6 +36,8 @@ pub fn router(
     app: AppHandle,
     app_state: Arc<Mutex<SharedAppState>>,
 ) -> Router {
+    // 手机端的剪贴板图片（截图/照片）经 base64 后轻松超过 axum 默认 2MB 上限，
+    // 会被直接拒成 413。放宽到 32MB：足以容纳 4K 截图/照片，同时防止恶意超大请求体。
     Router::new()
         .route("/api/pair", post(pair))
         .route("/api/status", get(status))
@@ -43,6 +45,7 @@ pub fn router(
         .route("/api/history", get(history))
         .route("/api/image", get(image_file))
         .route("/api/ws", get(ws_handler))
+        .layer(axum::extract::DefaultBodyLimit::max(32 * 1024 * 1024))
         .with_state(ServerState {
             sync,
             app,
