@@ -4,6 +4,8 @@
 //! - server → viewer：Binary = [flags][h264 负载]；Text = JSON 事件
 //! - viewer → server：Text = JSON 控制指令（解析后编码成 scrcpy 协议字节）
 
+use std::sync::{Arc, Mutex};
+
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::State;
 use axum::response::Response;
@@ -21,9 +23,21 @@ pub enum RelayFrame {
     Text(String),
 }
 
+/// 负责向所有 viewer 广播帧流。
+/// broadcast 通道不保留历史，而 scrcpy 的 SPS/PPS config 包、设备名、分辨率
+/// 只发送一次——晚接入的 viewer 会永远错过。这里额外保留这三份数据，
+/// 每个新 WS 订阅者接入时先重放。
 #[derive(Clone)]
 pub struct Hub {
     tx: broadcast::Sender<RelayFrame>,
+    retained: Arc<Retained>,
+}
+
+#[derive(Default)]
+struct Retained {
+    config: Mutex<Option<Vec<u8>>>,
+    device: Mutex<Option<String>>,
+    session: Mutex<Option<String>>,
 }
 
 impl Default for Hub {
@@ -35,15 +49,42 @@ impl Default for Hub {
 impl Hub {
     pub fn new() -> Self {
         let (tx, _) = broadcast::channel(512);
-        Self { tx }
+        Self {
+            tx,
+            retained: Arc::new(Retained::default()),
+        }
     }
 
     pub fn send_binary(&self, envelope: Vec<u8>) {
+        // envelope[0] bit0 = config 包（SPS/PPS），保留给晚接入的 viewer
+        if !envelope.is_empty() && (envelope[0] & 1) != 0 {
+            *self.retained.config.lock().unwrap() = Some(envelope.clone());
+        }
         let _ = self.tx.send(RelayFrame::Binary(envelope));
     }
 
     pub fn send_text(&self, json: String) {
+        if json.contains("\"type\":\"device\"") {
+            *self.retained.device.lock().unwrap() = Some(json.clone());
+        } else if json.contains("\"type\":\"session\"") {
+            *self.retained.session.lock().unwrap() = Some(json.clone());
+        }
         let _ = self.tx.send(RelayFrame::Text(json));
+    }
+
+    /// 新订阅者的补发数据：设备名 → 分辨率 → SPS/PPS config 包。
+    pub fn replay(&self) -> Vec<RelayFrame> {
+        let mut out = Vec::new();
+        if let Some(d) = &*self.retained.device.lock().unwrap() {
+            out.push(RelayFrame::Text(d.clone()));
+        }
+        if let Some(s) = &*self.retained.session.lock().unwrap() {
+            out.push(RelayFrame::Text(s.clone()));
+        }
+        if let Some(c) = &*self.retained.config.lock().unwrap() {
+            out.push(RelayFrame::Binary(c.clone()));
+        }
+        out
     }
 }
 
@@ -131,6 +172,16 @@ async fn handle_socket(
     control_tx: std::sync::mpsc::Sender<Vec<u8>>,
 ) {
     let mut rx = hub.tx.subscribe();
+    // 先补发 device/session/config（晚接入的 viewer 靠这份数据配置解码器）
+    for frame in hub.replay() {
+        let msg = match frame {
+            RelayFrame::Binary(data) => Message::Binary(data.into()),
+            RelayFrame::Text(text) => Message::Text(text.into()),
+        };
+        if socket.send(msg).await.is_err() {
+            return;
+        }
+    }
     loop {
         tokio::select! {
             frame = rx.recv() => match frame {
