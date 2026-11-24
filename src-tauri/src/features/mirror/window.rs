@@ -28,10 +28,10 @@ pub fn ensure_mirror_window(app: &AppHandle) -> Result<tauri::WebviewWindow, Str
     )
     .title("手机投屏")
     .visible(false)
-    .decorations(false) // 无边框：前端工具栏承担标题栏（拖拽/关闭）
+    .decorations(false) // 无边框：前端工具栏承担标题栏（拖拽/最小化/最大化/关闭）
     .resizable(true)
     .minimizable(true)
-    .maximizable(false)
+    .maximizable(true)
     .inner_size(432.0, 912.0)
     .min_inner_size(288.0, 288.0) // 允许横屏（视频全屏时窗口自动横竖切换）
     .build()

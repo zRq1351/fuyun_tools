@@ -76,12 +76,24 @@
           <svg viewBox="0 0 24 24"><path d="M6 12h12" /></svg>
         </button>
         <button
-          class="btn danger"
-          :disabled="!connected"
-          title="断开并关闭投屏"
-          @click="disconnect"
+          class="btn"
+          title="最大化 / 还原"
+          @click="toggleMaximize"
         >
-          <svg viewBox="0 0 24 24"><path d="M12 3v8M6.3 6.7a8 8 0 1 0 11.4 0" /></svg>
+          <svg viewBox="0 0 24 24"><rect
+            x="5.5"
+            y="5.5"
+            width="13"
+            height="13"
+            rx="1.5"
+          /></svg>
+        </button>
+        <button
+          class="btn close"
+          title="关闭投屏"
+          @click="closeWindow"
+        >
+          <svg viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18" /></svg>
         </button>
       </div>
     </div>
@@ -369,13 +381,25 @@ const sendHome = () => sendKeycode(3)       // KEYCODE_HOME
 const sendRecents = () => sendKeycode(187)  // KEYCODE_APP_SWITCH
 const sendRotate = () => sendControl({ kind: 'rotate' })
 
-async function disconnect() {
-  try { await invoke(IPC_COMMANDS.MIRROR_STOP) } catch { /* ignore */ }
+async function closeWindow() {
+  stopped = true
+  // 关窗即断开：后端监听窗口 Destroyed 会停止会话
   try { await getCurrentWindow().close() } catch { /* ignore */ }
 }
 
 async function minimizeWindow() {
   try { await getCurrentWindow().minimize() } catch { /* ignore */ }
+}
+
+async function toggleMaximize() {
+  try {
+    const win = getCurrentWindow()
+    if (await win.isMaximized()) {
+      await win.unmaximize()
+    } else {
+      await win.maximize()
+    }
+  } catch { /* ignore */ }
 }
 
 // ---- 窗口随视频方向横竖切换 ----
@@ -683,6 +707,12 @@ onUnmounted(() => {
 .btn.danger:hover:not(:disabled) {
   background: var(--danger-hover-bg);
   color: var(--danger-hover-text);
+}
+
+.btn.close:hover:not(:disabled) {
+  background: var(--danger-hover-bg);
+  color: var(--danger-hover-text);
+  border-color: var(--danger-border);
 }
 
 .divider {
