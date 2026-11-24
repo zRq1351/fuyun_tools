@@ -109,11 +109,12 @@ pub fn start(
         dir.join("scrcpy_server.log")
     });
 
-    // 注意：不要加 video_codec_options 之类的扩展参数——
-    // scrcpy 的 codec option 值按整数解析（"2s" 这类带后缀的值会让 server 启动即退）
+    // 注意：codec option 值按整数解析（不要带 "s" 后缀）。
+    // i-frame-interval=2：viewer 晚接入错过首个关键帧时最多 2 秒即可等到下一个。
     let options = format!(
         "scid={:08x} log_level=info video=true audio=false control=true \
          max_size={} video_bit_rate={} max_fps={} \
+         video_codec_options=i-frame-interval=2 \
          send_dummy_byte=false send_device_meta=true send_frame_meta=true \
          send_stream_meta=true tunnel_forward=false",
         scid, MAX_SIZE, BIT_RATE, MAX_FPS

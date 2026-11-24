@@ -7,6 +7,7 @@
       >
         {{ statusText }}
       </span>
+      <span class="diag">{{ diag.recv }} / {{ diag.decoded }}</span>
       <div class="actions">
         <button
           class="btn"
@@ -81,7 +82,7 @@
 </template>
 
 <script setup>
-import { onMounted, onUnmounted, ref } from 'vue'
+import { onMounted, onUnmounted, reactive, ref } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { IPC_COMMANDS } from '../../services/ipc'   
 import { getCurrentWindow } from '@tauri-apps/api/window'
@@ -91,11 +92,11 @@ const canvasRef = ref(null)
 const connected = ref(false)
 const errorMsg = ref('')
 const statusText = ref('未连接')
+const diag = reactive({ recv: 0, decoded: 0 })
 
 // ---- 状态 ----
 let ws = null
 let decoder = null
-let decoderConfig = null
 let videoW = 0
 let videoH = 0
 let pointerDown = false
@@ -188,11 +189,9 @@ function ensureDecoder(configPacket) {
       // 解码器出错：销毁，等下一个关键帧重新配置
       try { decoder.close() } catch { /* ignore */ }
       decoder = null
-      decoderConfig = null
     },
   })
   decoder.configure(config)
-  decoderConfig = config
 }
 
 function drawFrame(frame) {
@@ -214,25 +213,35 @@ function drawFrame(frame) {
   frame.close()
 }
 
-function feedChunk(payload, keyFrame) {
-  if (!decoder || decoder.state !== 'configured') return
-  // 剥掉负载里内嵌的 SPS/PPS NALU（已通过 description 提供），避免部分实现重复报警
-  let data = payload
-  if (keyFrame) {
-    const nalus = splitNalus(payload)
-    const filtered = nalus.filter((n) => naluType(n) !== 7 && naluType(n) !== 8)
-    if (filtered.length && filtered.length !== nalus.length) {
-      const total = filtered.reduce((s, n) => s + 4 + n.length, 0)
-      const merged = new Uint8Array(total)
-      let o = 0
-      for (const n of filtered) {
-        merged[o++] = 0; merged[o++] = 0; merged[o++] = 0; merged[o++] = 1
-        merged.set(n, o)
-        o += n.length
-      }
-      data = merged
-    }
+// Annex-B → AVCC：description（avcC）模式下 WebCodecs 要求数据为
+// 4 字节大端长度前缀 + NALU，而非 00 00 00 01 起始码。
+// keyFrame 时剥掉内嵌 SPS/PPS（类型 7/8，已通过 description 提供）。
+function annexbToAvcc(payload, stripParamSets) {
+  const nalus = splitNalus(payload)
+  const filtered = stripParamSets
+    ? nalus.filter((n) => naluType(n) !== 7 && naluType(n) !== 8)
+    : nalus
+  let total = 0
+  for (const n of filtered) total += 4 + n.length
+  const out = new Uint8Array(total)
+  let o = 0
+  for (const n of filtered) {
+    const len = n.length
+    out[o++] = (len >>> 24) & 0xff
+    out[o++] = (len >>> 16) & 0xff
+    out[o++] = (len >>> 8) & 0xff
+    out[o++] = len & 0xff
+    out.set(n, o)
+    o += len
   }
+  return out
+}
+
+function feedChunk(payload, keyFrame) {
+  diag.recv++
+  if (!decoder || decoder.state !== 'configured') return
+  const data = annexbToAvcc(payload, keyFrame)
+  if (!data.length) return
   timestampUs += 33333 // 30fps 节奏的单调时间戳
   try {
     decoder.decode(new EncodedVideoChunk({
@@ -240,6 +249,7 @@ function feedChunk(payload, keyFrame) {
       timestamp: timestampUs,
       data,
     }))
+    diag.decoded++
   } catch (e) {
     console.error('[mirror] decode failed:', e)
   }
@@ -347,16 +357,11 @@ function handleBinary(buffer) {
     ensureDecoder(payload)
     return
   }
-  if (isKey && (!decoder || decoder.state !== 'configured') && decoderConfig) {
-    // 中途加入：等关键帧重建解码器
-    ensureDecoderFromSaved()
+  if (isKey && (!decoder || decoder.state !== 'configured')) {
+    // 中途加入错过 config 包：关键帧自带 SPS/PPS，直接重建解码器
+    ensureDecoder(payload)
   }
   feedChunk(payload, isKey)
-}
-
-let savedConfigPacket = null
-function ensureDecoderFromSaved() {
-  if (savedConfigPacket) ensureDecoder(savedConfigPacket)
 }
 
 function connectWebSocket(port) {
@@ -432,6 +437,13 @@ onUnmounted(() => {
 
 .status.connected {
   color: #4cd47c;
+}
+
+.diag {
+  font-size: 11px;
+  color: #5b6773;
+  margin-left: 8px;
+  font-family: Consolas, monospace;
 }
 
 .status.connected::before {
