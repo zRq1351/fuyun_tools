@@ -173,6 +173,7 @@ export const IPC_COMMANDS = {
     MIRROR_STOP: 'mirror_stop',
     MIRROR_STATUS: 'mirror_status',
     MIRROR_PUSH_FILE: 'mirror_push_file',
+    MIRROR_EXPORT_RECENT: 'mirror_export_recent',
     SAVE_SCREENSHOT_TO_PATH: 'save_screenshot_to_path',
     EXPORT_SCREENSHOT_TO_PATH: 'export_screenshot_to_path',
     COPY_SCREENSHOT_TO_CLIPBOARD: 'copy_screenshot_to_clipboard',

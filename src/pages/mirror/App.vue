@@ -67,6 +67,14 @@
           >
             <svg viewBox="0 0 24 24"><path d="M4.5 9a8 8 0 0 1 14.3-2.6M19.5 15a8 8 0 0 1-14.3 2.6M18.8 3.2v3.4h-3.4M5.2 20.8v-3.4h3.4" /></svg>
           </button>
+          <button
+            class="btn"
+            :disabled="!connected"
+            title="导出手机最近文件/图片到电脑"
+            @click="onExport"
+          >
+            <svg viewBox="0 0 24 24"><path d="M12 4v10M8 10.5 12 14.5l4-4M5 19h14" /></svg>
+          </button>
         </div>
         <div class="seg win">
           <button
@@ -133,9 +141,7 @@
         type="text"
         autocomplete="off"
         @compositionend="onCompositionEnd"
-        @keydown="onKbdKey"
         @input="onKbdInput"
-        @paste.prevent="onPaste"
       >
       <div
         v-if="dragging"
@@ -180,6 +186,7 @@ import { IPC_COMMANDS } from '../../services/ipc'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { getCurrentWebview } from '@tauri-apps/api/webview'
 import { LogicalSize } from '@tauri-apps/api/dpi'
+import { open as openDialog } from '@tauri-apps/plugin-dialog'
 import { useTheme } from '../../composables/useTheme'
 import { initTheme } from '../../utils/themeManager'
 
@@ -421,12 +428,19 @@ const sendRecents = () => sendKeycode(187)  // KEYCODE_APP_SWITCH
 const sendRotate = () => sendControl({ kind: 'rotate' })
 
 // ---- 电脑键盘输入文字 ----
-// scrcpy 单条 INJECT_TEXT 上限 300 字符，按码点分块
+// scrcpy 单条 INJECT_TEXT 上限 300 字符，按码点分块。
+// 注意：INJECT_TEXT 走键盘字符映射，只支持 ASCII；中文等走
+// 「写设备剪贴板 + 模拟粘贴」通道（SET_CLIPBOARD paste=true）。
 function sendText(text) {
   if (!text || !connected.value) return
   const chars = [...text]
   for (let i = 0; i < chars.length; i += 200) {
-    sendControl({ kind: 'text', text: chars.slice(i, i + 200).join('') })
+    const chunk = chars.slice(i, i + 200).join('')
+    if (/^[\x20-\x7e\n\r\t]*$/.test(chunk)) {
+      sendControl({ kind: 'text', text: chunk })
+    } else {
+      sendControl({ kind: 'set-clipboard', paste: true, sequence: Date.now(), text: chunk })
+    }
   }
 }
 
@@ -446,9 +460,21 @@ const KEY_MAP = {
   PageDown: 93,
 }
 
-function onKbdKey(e) {
+// window 级键盘捕获：不依赖输入框焦点
+function onKeydown(e) {
+  if (e.key === 'Escape') {
+    if (isFs.value) getCurrentWindow().setFullscreen(false).catch(() => {})
+    return
+  }
   if (!connected.value) return
+  // 焦点在工具栏按钮上时保留按钮语义（空格/回车激活按钮）
+  if (e.target && e.target.closest && e.target.closest('.toolbar')) return
   if (e.isComposing || e.key === 'Process') return // IME 组合中，等 compositionend
+  if ((e.ctrlKey || e.metaKey) && (e.key === 'v' || e.key === 'V')) {
+    e.preventDefault()
+    handlePaste()
+    return
+  }
   if (e.ctrlKey || e.metaKey || e.altKey) return
   if (e.key.length === 1) {
     e.preventDefault()
@@ -468,13 +494,15 @@ function onCompositionEnd(e) {
 }
 
 function onKbdInput() {
-  // 输入框只作键盘/IME 捕获面，内容即取即清
+  // 输入框只作 IME 组合捕获面，内容即取即清
   if (kbdRef.value) kbdRef.value.value = ''
 }
 
-function onPaste(e) {
-  const text = e.clipboardData?.getData('text')
-  if (text) sendText(text)
+async function handlePaste() {
+  try {
+    const text = await invoke('plugin:clipboard-manager|read_text')
+    if (text) sendText(text)
+  } catch { /* ignore */ }
 }
 
 function refocusKbd() {
@@ -497,6 +525,19 @@ async function pushFile(path) {
     showToast(`已传输到手机：${r.dest}`)
   } catch (err) {
     showToast(`传输失败：${String(err)}`, 5000)
+  }
+}
+
+async function onExport() {
+  try {
+    const dir = await openDialog({ directory: true, title: '选择导出保存位置' })
+    if (!dir) return
+    showToast('正在从手机导出最近文件…', 15000)
+    const r = await invoke(IPC_COMMANDS.MIRROR_EXPORT_RECENT, { saveDir: dir, count: 10 })
+    const n = (r.exported || []).length
+    showToast(n > 0 ? `已导出 ${n} 个文件到 ${r.saveDir}` : '没有找到可导出的最近文件')
+  } catch (err) {
+    showToast(`导出失败：${String(err)}`, 5000)
   }
 }
 
@@ -528,12 +569,6 @@ function onMouseMove(event) {
     return
   }
   barShow.value = event.clientY <= 48
-}
-
-function onKeydown(event) {
-  if (event.key === 'Escape' && isFs.value) {
-    getCurrentWindow().setFullscreen(false).catch(() => {})
-  }
 }
 
 // ---- 窗口随视频方向横竖切换 ----
@@ -609,6 +644,7 @@ function connectWebSocket(port) {
     connected.value = true
     errorMsg.value = ''
     statusText.value = '已连接'
+    refocusKbd() // 为 IME 组合输入聚焦捕获框
   }
   ws.onmessage = (event) => {
     if (typeof event.data === 'string') {

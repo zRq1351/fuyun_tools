@@ -220,6 +220,73 @@ pub async fn mirror_push_file(_app: AppHandle, path: String) -> Result<serde_jso
     }))
 }
 
+/// 从手机导出最近的文件/图片到本地目录（DCIM 相机、截图、Pictures 逐目录按时间倒序）。
+#[tauri::command]
+pub async fn mirror_export_recent(
+    _app: AppHandle,
+    save_dir: String,
+    count: Option<u32>,
+) -> Result<serde_json::Value, String> {
+    let (adb_path, serial) = {
+        let guard = state().session.lock().unwrap();
+        match guard.as_ref() {
+            Some(s) => (s.adb_path.clone(), s.serial.clone()),
+            None => return Err("投屏会话未运行".into()),
+        }
+    };
+    let count = count.unwrap_or(10).clamp(1, 50) as usize;
+
+    let adb = adb_path.clone();
+    let serial2 = serial.clone();
+    let save = save_dir.clone();
+    let res = tauri::async_runtime::spawn_blocking(move || -> Result<serde_json::Value, String> {
+        let mut exported: Vec<String> = Vec::new();
+        let dirs = ["/sdcard/DCIM/Camera", "/sdcard/Pictures/Screenshots", "/sdcard/Pictures"];
+        for dir in dirs {
+            let out = match adb::run_adb(
+                &adb,
+                &["-s", &serial2, "shell", "ls", "-t", dir],
+                Duration::from_secs(15),
+            ) {
+                Ok(o) => o,
+                Err(_) => continue, // 目录可能不存在
+            };
+            for line in out.lines().take(count) {
+                let name = line.trim().to_string();
+                if name.is_empty() || name.contains('/') || !name.contains('.') {
+                    continue; // 跳过子目录与非文件行
+                }
+                if exported.iter().any(|e| e.ends_with(&name)) {
+                    continue; // 同名文件已在其他目录导出过
+                }
+                let remote = format!("{}/{}", dir, name);
+                let local = std::path::Path::new(&save).join(&name);
+                let local_str = local.to_string_lossy().to_string();
+                if let Err(e) = adb::run_adb(
+                    &adb,
+                    &["-s", &serial2, "pull", &remote, &local_str],
+                    Duration::from_secs(300),
+                ) {
+                    log::warn!("[mirror] 导出失败 {}: {}", remote, e);
+                    continue;
+                }
+                exported.push(local_str);
+                if exported.len() >= count {
+                    break;
+                }
+            }
+            if exported.len() >= count {
+                break;
+            }
+        }
+        log::info!("[mirror] 从手机导出 {} 个文件到 {}", exported.len(), save);
+        Ok(serde_json::json!({ "exported": exported, "saveDir": save }))
+    })
+    .await
+    .map_err(|e| format!("导出任务失败: {}", e))??;
+    Ok(res)
+}
+
 /// 停止会话（供窗口销毁/退出时调用）。
 pub fn stop_session(app: &AppHandle) {
     if let Some(session) = state().session.lock().unwrap().take() {
