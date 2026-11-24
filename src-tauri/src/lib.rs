@@ -739,6 +739,7 @@ pub fn run() {
             crate::features::mirror::commands::mirror_list_phone_files,
             crate::features::mirror::commands::mirror_pull_files,
             crate::features::mirror::commands::mirror_drag_export,
+            crate::features::mirror::commands::mirror_drag_screen,
             resize_recording_toolbar,
             check_recording_ffmpeg,
             download_recording_ffmpeg,

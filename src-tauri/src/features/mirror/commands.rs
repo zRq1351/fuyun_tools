@@ -418,6 +418,192 @@ pub async fn mirror_drag_export(items: Vec<super::dragout::DragItem>) -> Result<
     super::dragout::begin_drag(adb_path, serial, items)
 }
 
+/// 画布拖出：在投屏画面上按住并拖出窗口。
+/// 优先识别按下位置的真实文件（uiautomator dump + 按名搜索），
+/// 失败则拖出当前画面截图（由前端捕获的 PNG）。
+#[tauri::command]
+pub async fn mirror_drag_screen(
+    _app: AppHandle,
+    png: String,
+    x: i32,
+    y: i32,
+) -> Result<(), String> {
+    let (adb_path, serial) = {
+        let guard = state().session.lock().unwrap();
+        match guard.as_ref() {
+            Some(s) => (s.adb_path.clone(), s.serial.clone()),
+            None => return Err("投屏会话未运行".into()),
+        }
+    };
+    // png: dataURL 或纯 base64
+    let b64 = png.strip_prefix("data:image/png;base64,").unwrap_or(&png);
+    use base64::Engine as _;
+    let png_bytes = base64::engine::general_purpose::STANDARD
+        .decode(b64)
+        .map_err(|e| format!("截图数据解码失败: {}", e))?;
+    if png_bytes.is_empty() {
+        return Err("截图数据为空".into());
+    }
+
+    tauri::async_runtime::spawn_blocking(move || {
+        let (item, hint) = recognize_at(&adb_path, &serial, x, y)
+            .map(|(name, path, size)| {
+                (
+                    super::dragout::DragItem {
+                        name,
+                        size,
+                        path,
+                        local_png: None,
+                    },
+                    "文件",
+                )
+            })
+            .unwrap_or_else(|| {
+                let ts = chrono::Local::now().format("%Y%m%d_%H%M%S");
+                (
+                    super::dragout::DragItem {
+                        name: format!("手机截屏_{}.png", ts),
+                        size: png_bytes.len() as u64,
+                        path: String::new(),
+                        local_png: Some(png_bytes),
+                    },
+                    "截屏",
+                )
+            });
+        log::info!("[mirror-drag] 画布拖出: {} ({})", item.name, hint);
+        if let Err(e) = super::dragout::begin_drag(adb_path, serial, vec![item]) {
+            log::warn!("[mirror-drag] 启动拖放失败: {}", e);
+        }
+    });
+    Ok(())
+}
+
+/// 在按下点识别真实文件：dump UI 找含扩展名的节点文本 → 常用目录按名搜索。
+/// 返回 (文件名, 远端路径, 大小)。
+fn recognize_at(
+    adb: &std::path::Path,
+    serial: &str,
+    x: i32,
+    y: i32,
+) -> Option<(String, String, u64)> {
+    use std::time::Duration;
+
+    let dump_path = "/sdcard/fuyun_drag_dump.xml";
+    if adb::run_adb(
+        adb,
+        &["-s", serial, "shell", "uiautomator", "dump", dump_path],
+        Duration::from_secs(12),
+    )
+    .is_err()
+    {
+        return None;
+    }
+    let xml = adb::run_adb(
+        adb,
+        &["-s", serial, "shell", "cat", dump_path],
+        Duration::from_secs(10),
+    )
+    .ok()?;
+    let _ = adb::run_adb(
+        adb,
+        &["-s", serial, "shell", "rm", "-f", dump_path],
+        Duration::from_secs(5),
+    );
+
+    let node_re = regex::Regex::new(r"<node[^>]*>").ok()?;
+    let bounds_re = regex::Regex::new(r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]").ok()?;
+    let attr = |tag: &str, name: &str| -> Option<String> {
+        regex::Regex::new(&format!(r#"{}="([^"]*)""#, name))
+            .ok()?
+            .captures(tag)?
+            .get(1)
+            .map(|m| m.as_str().to_string())
+    };
+
+    // 已知文件扩展名（可扩展）
+    const EXTS: &[&str] = &[
+        "jpg", "jpeg", "png", "gif", "webp", "bmp", "heic", "mp4", "mov", "avi", "mkv", "mp3",
+        "wav", "flac", "aac", "pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "txt", "csv",
+        "zip", "rar", "7z", "apk", "epub",
+    ];
+    let is_file_name = |t: &str| -> bool {
+        let t = t.trim();
+        if t.is_empty() || t.contains('\n') || t.len() > 128 {
+            return false;
+        }
+        let lower = t.to_lowercase();
+        EXTS.iter().any(|e| lower.ends_with(&format!(".{}", e)))
+    };
+
+    // 找包含按下点且文本像文件名的节点
+    let mut name: Option<String> = None;
+    for tag in node_re.find_iter(&xml) {
+        let tag = tag.as_str();
+        let text = attr(tag, "text").unwrap_or_default();
+        let desc = attr(tag, "content-desc").unwrap_or_default();
+        let candidate = if is_file_name(&text) {
+            text
+        } else if is_file_name(&desc) {
+            desc
+        } else {
+            continue;
+        };
+        if let Some(b) = bounds_re.captures(tag) {
+            let x1: i32 = b[1].parse().ok()?;
+            let y1: i32 = b[2].parse().ok()?;
+            let x2: i32 = b[3].parse().ok()?;
+            let y2: i32 = b[4].parse().ok()?;
+            if x >= x1 && x < x2 && y >= y1 && y < y2 {
+                name = Some(candidate.trim().to_string());
+                break;
+            }
+        }
+    }
+    let name = name?;
+    log::info!("[mirror-drag] 识别到文件名: {}", name);
+
+    // 常用目录按名搜索（找不到则失败）
+    let dirs = [
+        "/sdcard/Download",
+        "/sdcard/DCIM",
+        "/sdcard/Pictures",
+        "/sdcard/Documents",
+        "/sdcard/Movies",
+        "/sdcard/Music",
+        "/sdcard/Android/data",
+    ];
+    let escaped = name.replace('\'', "");
+    let cmd = format!(
+        "find {} -name '{}' 2>/dev/null | head -1",
+        dirs.join(" "),
+        escaped
+    );
+    let found = adb::run_adb(adb, &["-s", serial, "shell", &cmd], Duration::from_secs(20)).ok()?;
+    let path = found.lines().next()?.trim().to_string();
+    if path.is_empty() || !path.starts_with('/') {
+        return None;
+    }
+    // 取文件大小（失败不阻塞，size=0 也可拖）
+    let size = adb::run_adb(
+        adb,
+        &[
+            "-s",
+            serial,
+            "shell",
+            &format!("ls -l '{}' 2>/dev/null", path),
+        ],
+        Duration::from_secs(10),
+    )
+    .ok()
+    .and_then(|out| {
+        out.split_whitespace()
+            .nth(4)
+            .and_then(|s| s.parse::<u64>().ok())
+    })
+    .unwrap_or(0);
+    Some((name, path, size))
+}
+
 /// 停止会话（供窗口销毁/退出时调用）。
 pub fn stop_session(app: &AppHandle) {
     if let Some(session) = state().session.lock().unwrap().take() {

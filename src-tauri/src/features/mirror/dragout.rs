@@ -38,6 +38,9 @@ pub struct DragItem {
     pub name: String,
     pub size: u64,
     pub path: String,
+    /// 截图模式：内容直接由前端提供（当前画面 PNG），无需 adb pull。
+    #[serde(default)]
+    pub local_png: Option<Vec<u8>>,
 }
 
 /// 注册的剪贴板格式（进程内只注册一次即可，但注册很便宜，每次拖放注册一遍也安全）。
@@ -97,6 +100,10 @@ impl DragDataObject {
             .items
             .get(idx)
             .ok_or_else(|| WError::from_hresult(DV_E_LINDEX))?;
+        // 截图模式：内容已在前端捕获
+        if let Some(bytes) = &item.local_png {
+            return Ok(alloc_bytes(bytes));
+        }
         let dir = Self::tmp_dir();
         let _ = std::fs::create_dir_all(&dir);
         let local = dir.join(format!("{}_{}", idx, Self::sanitize_name(&item.name)));

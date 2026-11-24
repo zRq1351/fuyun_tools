@@ -168,13 +168,14 @@ pub fn start(
                 .map_err(|e| e.to_string())?;
         }
 
-        // 设备回传消息消费线程（v1 仅按格式丢弃，保证字节流不错位）
+        // 设备回传消息消费线程（转发剪贴板回显，其余按格式丢弃保证字节流不错位）
         {
+            let hub = hub.clone();
             let stop_flag = stop_flag.clone();
             std::thread::Builder::new()
                 .name("mirror-device-msg-reader".into())
                 .spawn(move || {
-                    run_device_msg_reader(&mut control_read, &stop_flag);
+                    run_device_msg_reader(&mut control_read, &stop_flag, &hub);
                 })
                 .map_err(|e| e.to_string())?;
         }
@@ -400,8 +401,9 @@ fn run_video_reader(video: &mut TcpStream, hub: &Hub, stop_flag: &AtomicBool) {
 }
 
 /// 设备 → client 的消息：type u8；CLIPBOARD(0)=len u32+data；ACK_CLIPBOARD(1)=i64；
-/// UHID_OUTPUT(2)=u16 id + u16 len + data。v1 仅消费丢弃。
-fn run_device_msg_reader(control: &mut TcpStream, stop_flag: &AtomicBool) {
+/// UHID_OUTPUT(2)=u16 id + u16 len + data。
+/// CLIPBOARD 转发为中继文本消息（autosync 下设备剪贴板变化会自动回传）。
+fn run_device_msg_reader(control: &mut TcpStream, stop_flag: &AtomicBool, hub: &Hub) {
     let mut u32_buf = [0u8; 4];
     let mut u16_buf = [0u8; 2];
     let mut u8_buf = [0u8; 1];
@@ -432,7 +434,9 @@ fn run_device_msg_reader(control: &mut TcpStream, stop_flag: &AtomicBool) {
                     );
                     return;
                 }
-                log::warn!("[mirror] 收到设备剪贴板消息 ({} 字节)", len);
+                let text = String::from_utf8_lossy(&sink).to_string();
+                log::warn!("[mirror] 收到设备剪贴板 ({} 字节): {}", len, text);
+                hub.send_text(serde_json::json!({ "type": "clipboard", "text": text }).to_string());
             }
             1 => {
                 if read_exact_loop(control, &mut i64_buf).is_err() {

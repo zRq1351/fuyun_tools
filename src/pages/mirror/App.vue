@@ -150,6 +150,12 @@
         松开传输到手机
       </div>
       <div
+        v-if="dragOverlay"
+        class="drag-overlay"
+      >
+        正在准备拖出（识别文件/截屏）…<br>拖到电脑桌面或文件夹后松手
+      </div>
+      <div
         v-if="toastMsg"
         class="toast"
       >
@@ -193,7 +199,8 @@
           </div>
           <div class="export-list">
             <div class="export-tip">
-              可勾选后「导出所选」，也可按住文件直接拖到电脑桌面/文件夹
+              在手机画面上按住图片/文件拖出窗口即可传到电脑（相册、聊天图片、APP 界面图片均支持）；
+              也可勾选后「导出所选」，或按住文件行拖出
             </div>
             <div class="export-list">
               <template v-if="!exportLoading">
@@ -285,6 +292,7 @@ const statusText = ref('未连接')
 const isFs = ref(false)
 const barShow = ref(true)
 const dragging = ref(false)
+const dragOverlay = ref(false)
 const toastMsg = ref('')
 let toastTimer = null
 const exportOpen = ref(false)
@@ -472,18 +480,55 @@ function videoPoint(event) {
   return { x, y }
 }
 
+// ---- 画布拖出：按住画面拖出窗口 = 智能导出（识别真实文件，兜底截屏）----
+let downClient = null // { x, y, devX, devY }
+let dragOutActive = false
+
 function onPointerDown(event) {
   if (!connected.value || !videoW) return
   canvasRef.value.setPointerCapture(event.pointerId)
   pointerDown = true
+  dragOutActive = false
   const { x, y } = videoPoint(event)
+  downClient = { cx: event.clientX, cy: event.clientY, devX: x, devY: y }
   sendControl({ kind: 'touch', action: 0, x, y, w: videoW, h: videoH, pressure: 1.0 })
 }
 
 function onPointerMove(event) {
   if (!connected.value || !pointerDown || !videoW) return
   const { x, y } = videoPoint(event)
+  // 拖出检测：按住移动超过 10px → 取消手机侧触摸，改为 OS 级拖出
+  if (!dragOutActive && downClient) {
+    const dx = event.clientX - downClient.cx
+    const dy = event.clientY - downClient.cy
+    if (dx * dx + dy * dy > 100) {
+      dragOutActive = true
+      sendControl({ kind: 'touch', action: 1, x, y, w: videoW, h: videoH, pressure: 1.0 })
+      startDragOut()
+      return
+    }
+  }
+  if (dragOutActive) return
   sendControl({ kind: 'touch', action: 2, x, y, w: videoW, h: videoH, pressure: 1.0 })
+}
+
+async function startDragOut() {
+  if (!downClient || !videoW) return
+  dragOverlay.value = true
+  try {
+    // 捕获当前画面帧（同步 dataURL，约几十 ms）
+    const dataUrl = canvasRef.value.toDataURL('image/png')
+    await invoke(IPC_COMMANDS.MIRROR_DRAG_SCREEN, {
+      png: dataUrl,
+      x: downClient.devX,
+      y: downClient.devY,
+    })
+    showToast('识别文件中，拖到桌面/文件夹后松手即可…', 4000)
+  } catch (err) {
+    showToast(`拖出失败：${String(err)}`, 4000)
+  } finally {
+    setTimeout(() => { dragOverlay.value = false }, 800)
+  }
 }
 
 function onPointerUp(event) {
@@ -491,6 +536,8 @@ function onPointerUp(event) {
   if (connected.value && videoW) refocusKbd()
   if (!connected.value || !pointerDown || !videoW) return
   pointerDown = false
+  // 拖出模式下手机侧触摸已取消，不再补发 touch up
+  if (dragOutActive) return
   const { x, y } = videoPoint(event)
   sendControl({ kind: 'touch', action: 1, x, y, w: videoW, h: videoH, pressure: 1.0 })
 }
@@ -803,6 +850,10 @@ function handleText(text) {
       connected.value = false
       statusText.value = '已断开'
       if (!stopped) errorMsg.value = '投屏会话已结束（设备断开或被停止）'
+      break
+    case 'clipboard':
+      // 手机剪贴板变化（autosync 回传）
+      if (msg.text) showToast(`手机剪贴板：${String(msg.text).slice(0, 40)}`, 2500)
       break
     default:
       break
