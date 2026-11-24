@@ -10,8 +10,8 @@ use std::process::{Child, Command, Stdio};
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
 
-use tauri::Manager;
 use std::time::Duration;
+use tauri::Manager;
 
 /// Windows 下不弹出控制台黑框。
 #[cfg(windows)]
@@ -32,7 +32,10 @@ pub fn resolve_adb(app: Option<&tauri::AppHandle>) -> Result<PathBuf, String> {
             // 打包器把 "../third_party/*" 安装到 resource_dir/_up_/third_party/；
             // 开发态可能是 resource_dir/third_party/。
             let candidates = [
-                dir.join("_up_").join("third_party").join("scrcpy").join("adb.exe"),
+                dir.join("_up_")
+                    .join("third_party")
+                    .join("scrcpy")
+                    .join("adb.exe"),
                 dir.join("third_party").join("scrcpy").join("adb.exe"),
                 dir.join("adb.exe"),
             ];
@@ -123,11 +126,21 @@ pub fn list_device_serials(adb: &std::path::Path) -> Result<Vec<String>, String>
 }
 
 /// 推送 scrcpy-server 到设备。
-pub fn push_server(adb: &std::path::Path, serial: &str, jar: &std::path::Path) -> Result<(), String> {
+pub fn push_server(
+    adb: &std::path::Path,
+    serial: &str,
+    jar: &std::path::Path,
+) -> Result<(), String> {
     let jar_str = jar.to_string_lossy().to_string();
     run_adb(
         adb,
-        &["-s", serial, "push", &jar_str, "/data/local/tmp/scrcpy-server.jar"],
+        &[
+            "-s",
+            serial,
+            "push",
+            &jar_str,
+            "/data/local/tmp/scrcpy-server.jar",
+        ],
         Duration::from_secs(15),
     )
     .map(|_| ())
@@ -142,7 +155,12 @@ pub fn enable_reverse(
 ) -> Result<(), String> {
     let name = format!("localabstract:{}", socket_name);
     let port = format!("tcp:{}", tcp_port);
-    run_adb(adb, &["-s", serial, "reverse", &name, &port], Duration::from_secs(5)).map(|_| ())
+    run_adb(
+        adb,
+        &["-s", serial, "reverse", &name, &port],
+        Duration::from_secs(5),
+    )
+    .map(|_| ())
 }
 
 /// 移除反向隧道（静默失败，隧道可能已随 adb 掉线消失）。
@@ -179,11 +197,10 @@ pub fn start_server(
         .stdout(stdout)
         .stderr(stderr);
     hide_console(&mut cmd);
-    cmd.spawn()
-        .map_err(|e| {
-            log::error!("[mirror] 启动 scrcpy server 失败: {}", e);
-            format!("启动 scrcpy server 失败: {}", e)
-        })
+    cmd.spawn().map_err(|e| {
+        log::error!("[mirror] 启动 scrcpy server 失败: {}", e);
+        format!("启动 scrcpy server 失败: {}", e)
+    })
 }
 
 /// 在随机端口上监听本机回环，等待 scrcpy server 反向连入。

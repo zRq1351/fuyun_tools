@@ -42,7 +42,6 @@ pub struct SessionHandle {
     pub control_tx: mpsc::Sender<Vec<u8>>,
 }
 
-
 impl SessionHandle {
     /// 停止会话：杀 server 进程、撤隧道、广播结束事件。
     pub fn stop(&self) {
@@ -55,9 +54,8 @@ impl SessionHandle {
             *guard = None;
         }
         adb::disable_reverse(&self.adb_path, &self.serial, &self.socket_name);
-        self.hub.send_text(
-            serde_json::json!({"type": "stopped", "reason": "stopped"}).to_string(),
-        );
+        self.hub
+            .send_text(serde_json::json!({"type": "stopped", "reason": "stopped"}).to_string());
     }
 
     /// 发送控制指令（协议字节）到设备。
@@ -87,7 +85,10 @@ pub fn start(
         1 => serials[0].clone(),
         _ => {
             log::error!("[mirror] 检测到 {} 台设备，暂不支持选择", serials.len());
-            return Err(format!("检测到多台设备（{} 台），暂不支持选择", serials.len()));
+            return Err(format!(
+                "检测到多台设备（{} 台），暂不支持选择",
+                serials.len()
+            ));
         }
     };
 
@@ -130,21 +131,22 @@ pub fn start(
 
     let build = || -> Result<SessionHandle, String> {
         // 依次 accept：video → control（audio=false 时只有这两个）
-        let mut video = accept_with_timeout(&listener, Duration::from_secs(15))
-            .ok_or_else(|| {
+        let mut video =
+            accept_with_timeout(&listener, Duration::from_secs(15)).ok_or_else(|| {
                 log::error!("[mirror] 等待设备视频连接超时（15s）");
                 "等待设备视频连接超时（server 未响应，可查看日志）".to_string()
             })?;
-        let mut control = accept_with_timeout(&listener, Duration::from_secs(10))
-            .ok_or_else(|| {
+        let mut control =
+            accept_with_timeout(&listener, Duration::from_secs(10)).ok_or_else(|| {
                 log::error!("[mirror] 等待设备控制连接超时（10s）");
                 "等待设备控制连接超时".to_string()
             })?;
         video.set_nodelay(true).ok();
         control.set_nodelay(true).ok();
         // 读（设备回传）与写（控制指令）分离，避免两个线程争抢同一句柄
-        let mut control_read =
-            control.try_clone().map_err(|e| format!("克隆控制连接失败: {}", e))?;
+        let mut control_read = control
+            .try_clone()
+            .map_err(|e| format!("克隆控制连接失败: {}", e))?;
 
         // 设备元数据：64 字节 UTF-8 设备名（仅在第一个 socket 上发送）
         let device_name = read_device_meta(&mut video)?;
@@ -152,9 +154,7 @@ pub fn start(
         let (control_tx, control_rx) = mpsc::channel::<Vec<u8>>();
         let stop_flag = Arc::new(AtomicBool::new(false));
 
-        hub.send_text(
-            serde_json::json!({"type": "device", "name": device_name}).to_string(),
-        );
+        hub.send_text(serde_json::json!({"type": "device", "name": device_name}).to_string());
 
         // video 读线程：解析帧头 → 广播 H264 负载
         {
@@ -344,7 +344,12 @@ fn run_video_reader(video: &mut TcpStream, hub: &Hub, stop_flag: &AtomicBool) {
                         .to_string(),
                 );
             }
-            VideoHeader::Media { config, key_frame, size, .. } => {
+            VideoHeader::Media {
+                config,
+                key_frame,
+                size,
+                ..
+            } => {
                 if size == 0 || size > 16 * 1024 * 1024 {
                     log::warn!(
                         "[mirror] video reader 退出：异常帧大小 {}（第 {} 帧, key={} config={}）",
@@ -421,7 +426,10 @@ fn run_device_msg_reader(control: &mut TcpStream, stop_flag: &AtomicBool) {
                 let len = u32::from_be_bytes(u32_buf) as usize;
                 let mut sink = vec![0u8; len];
                 if read_exact_loop(control, &mut sink).is_err() {
-                    log::warn!("[mirror] control reader: CLIPBOARD 数据读取失败 (len={})", len);
+                    log::warn!(
+                        "[mirror] control reader: CLIPBOARD 数据读取失败 (len={})",
+                        len
+                    );
                     return;
                 }
                 log::warn!("[mirror] 收到设备剪贴板消息 ({} 字节)", len);

@@ -144,10 +144,7 @@ pub async fn serve(hub: Hub, control_tx: std::sync::mpsc::Sender<Vec<u8>>) -> Re
     let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
         .await
         .map_err(|e| format!("绑定中继端口失败: {}", e))?;
-    let port = listener
-        .local_addr()
-        .map_err(|e| e.to_string())?
-        .port();
+    let port = listener.local_addr().map_err(|e| e.to_string())?.port();
     let app = Router::new()
         .route("/mirror", get(ws_handler))
         .with_state((hub, control_tx));

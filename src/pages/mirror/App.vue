@@ -192,62 +192,68 @@
             </button>
           </div>
           <div class="export-list">
-            <template v-if="!exportLoading">
-              <template
-                v-for="g in exportGroups"
-                :key="g.dir"
-              >
-                <div class="export-dir">
-                  <span>{{ g.dir }}</span>
-                  <span
-                    class="sel-all"
-                    @click="toggleGroup(g)"
-                  >{{ g.allSelected ? '取消全选' : '全选' }}</span>
-                </div>
-                <label
-                  v-for="f in g.files"
-                  :key="f.path"
-                  class="export-item"
-                >
-                  <input
-                    v-model="selectedPaths"
-                    type="checkbox"
-                    :value="f.path"
-                  >
-                  <span class="fname">{{ f.name }}</span>
-                  <span class="fsize">{{ fmtSize(f.size) }}</span>
-                </label>
-                <div
-                  v-if="!g.files.length"
-                  class="export-empty"
-                >
-                  （无文件）
-                </div>
-              </template>
-            </template>
-            <div
-              v-else
-              class="export-empty"
-            >
-              正在读取手机文件列表…
+            <div class="export-tip">
+              可勾选后「导出所选」，也可按住文件直接拖到电脑桌面/文件夹
             </div>
-          </div>
-          <div class="export-foot">
-            <span class="sel-count">已选 {{ selectedPaths.length }} 项</span>
-            <button
-              class="btn"
-              title="刷新列表"
-              @click="refreshExport"
-            >
-              <svg viewBox="0 0 24 24"><path d="M4.5 9a8 8 0 0 1 14.3-2.6M19.5 15a8 8 0 0 1-14.3 2.6M18.8 3.2v3.4h-3.4M5.2 20.8v-3.4h3.4" /></svg>
-            </button>
-            <button
-              class="btn primary"
-              :disabled="!selectedPaths.length"
-              @click="confirmExport"
-            >
-              导出所选
-            </button>
+            <div class="export-list">
+              <template v-if="!exportLoading">
+                <template
+                  v-for="g in exportGroups"
+                  :key="g.dir"
+                >
+                  <div class="export-dir">
+                    <span>{{ g.dir }}</span>
+                    <span
+                      class="sel-all"
+                      @click="toggleGroup(g)"
+                    >{{ g.allSelected ? '取消全选' : '全选' }}</span>
+                  </div>
+                  <label
+                    v-for="f in g.files"
+                    :key="f.path"
+                    class="export-item"
+                    @mousedown="onItemMouseDown(f, $event)"
+                  >
+                    <input
+                      v-model="selectedPaths"
+                      type="checkbox"
+                      :value="f.path"
+                    >
+                    <span class="fname">{{ f.name }}</span>
+                    <span class="fsize">{{ fmtSize(f.size) }}</span>
+                  </label>
+                  <div
+                    v-if="!g.files.length"
+                    class="export-empty"
+                  >
+                    （无文件）
+                  </div>
+                </template>
+              </template>
+              <div
+                v-else
+                class="export-empty"
+              >
+                正在读取手机文件列表…
+              </div>
+            </div>
+            <div class="export-foot">
+              <span class="sel-count">已选 {{ selectedPaths.length }} 项</span>
+              <button
+                class="btn"
+                title="刷新列表"
+                @click="refreshExport"
+              >
+                <svg viewBox="0 0 24 24"><path d="M4.5 9a8 8 0 0 1 14.3-2.6M19.5 15a8 8 0 0 1-14.3 2.6M18.8 3.2v3.4h-3.4M5.2 20.8v-3.4h3.4" /></svg>
+              </button>
+              <button
+                class="btn primary"
+                :disabled="!selectedPaths.length"
+                @click="confirmExport"
+              >
+                导出所选
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -511,7 +517,8 @@ const sendRotate = () => sendControl({ kind: 'rotate' })
 // ---- 电脑键盘输入文字 ----
 // scrcpy 单条 INJECT_TEXT 上限 300 字符，按码点分块。
 // 注意：INJECT_TEXT 走键盘字符映射，只支持 ASCII；中文等走
-// 「写设备剪贴板 + 模拟粘贴」通道（SET_CLIPBOARD paste=true）。
+// 「写设备剪贴板 + 注入 Ctrl+V」通道（legacy paste）。
+// 不用 SET_CLIPBOARD paste=true（KEYCODE_PASTE），部分系统（HyperOS）上不生效。
 function sendText(text) {
   if (!text || !connected.value) return
   const chars = [...text]
@@ -520,9 +527,22 @@ function sendText(text) {
     if (/^[\x20-\x7e\n\r\t]*$/.test(chunk)) {
       sendControl({ kind: 'text', text: chunk })
     } else {
-      sendControl({ kind: 'set-clipboard', paste: true, sequence: Date.now(), text: chunk })
+      sendControl({ kind: 'set-clipboard', paste: false, sequence: Date.now(), text: chunk })
+      // 等设备剪贴板写完再注入 Ctrl+V
+      setTimeout(sendCtrlV, 150)
     }
   }
+}
+
+// 注入 Ctrl+V（AMETA_CTRL_ON | AMETA_CTRL_LEFT_ON = 0x3000）
+function sendCtrlV() {
+  const CTRL = 113
+  const V = 50
+  const META_CTRL = 0x3000
+  sendControl({ kind: 'keycode', action: 0, keycode: CTRL, repeat: 0, metaState: META_CTRL })
+  sendControl({ kind: 'keycode', action: 0, keycode: V, repeat: 0, metaState: META_CTRL })
+  sendControl({ kind: 'keycode', action: 1, keycode: V, repeat: 0, metaState: META_CTRL })
+  sendControl({ kind: 'keycode', action: 1, keycode: CTRL, repeat: 0, metaState: 0 })
 }
 
 // 特殊键 → Android keycode（Enter/Backspace/方向键等）
@@ -681,6 +701,36 @@ async function confirmExport() {
   }
 }
 
+// ---- 拖拽导出：按住文件拖出窗口，OS 级拖放到资源管理器/桌面 ----
+let pendingDrag = null
+
+function onItemMouseDown(f, e) {
+  if (e.button !== 0) return
+  pendingDrag = { x: e.clientX, y: e.clientY, item: f }
+}
+
+function onDragOutMove(e) {
+  if (!pendingDrag || !(e.buttons & 1)) {
+    pendingDrag = null
+    return
+  }
+  const dx = e.clientX - pendingDrag.x
+  const dy = e.clientY - pendingDrag.y
+  if (dx * dx + dy * dy < 36) return // 6px 拖动阈值，避免误触发点击
+  const f = pendingDrag.item
+  pendingDrag = null
+  if (!connected.value) return
+  // 拖动已勾选的文件时，拖出整组勾选项（同资源管理器多选拖拽语义）
+  const items = selectedPaths.value.includes(f.path)
+    ? phoneFiles.value.filter((x) => selectedPaths.value.includes(x.path))
+    : [f]
+  invoke(IPC_COMMANDS.MIRROR_DRAG_EXPORT, { items }).catch(() => {})
+}
+
+function onDragOutEnd() {
+  pendingDrag = null
+}
+
 async function closeWindow() {
   stopped = true
   // 关窗即断开：后端监听窗口 Destroyed 会停止会话
@@ -809,6 +859,8 @@ onMounted(async () => {
     })
   } catch { /* ignore */ }
   window.addEventListener('keydown', onKeydown)
+  window.addEventListener('mousemove', onDragOutMove)
+  window.addEventListener('mouseup', onDragOutEnd)
   try {
     unlistenDrag = await getCurrentWebview().onDragDropEvent((ev) => {
       const p = ev.payload
@@ -839,6 +891,8 @@ onUnmounted(() => {
   if (unlistenResize) { unlistenResize(); unlistenResize = null }
   if (unlistenDrag) { unlistenDrag(); unlistenDrag = null }
   window.removeEventListener('keydown', onKeydown)
+  window.removeEventListener('mousemove', onDragOutMove)
+  window.removeEventListener('mouseup', onDragOutEnd)
   window.removeEventListener('focus', refocusKbd)
   if (toastTimer) clearTimeout(toastTimer)
   if (ws) { try { ws.close() } catch { /* ignore */ } ws = null }
@@ -1237,6 +1291,12 @@ onUnmounted(() => {
   color: var(--text);
 }
 
+.export-tip {
+  padding: 8px 8px 0;
+  font-size: 11px;
+  color: var(--muted);
+}
+
 .export-list {
   flex: 1;
   overflow-y: auto;
@@ -1271,6 +1331,7 @@ onUnmounted(() => {
   cursor: pointer;
   font-size: 13px;
   color: var(--text);
+  user-select: none;
 }
 
 .export-item:hover {

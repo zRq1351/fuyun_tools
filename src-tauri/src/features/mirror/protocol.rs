@@ -163,7 +163,12 @@ pub enum VideoHeader {
     /// session 重置（设备旋转/分辨率变化）：新宽高 + 是否客户端缩放触发
     Session { width: u32, height: u32 },
     /// 媒体包：pts（微秒）、是否配置包（SPS/PPS）、是否关键帧、负载长度
-    Media { pts: i64, config: bool, key_frame: bool, size: u32 },
+    Media {
+        pts: i64,
+        config: bool,
+        key_frame: bool,
+        size: u32,
+    },
 }
 
 /// 解析 12 字节帧头。首字节 MSB=1 为 session 包（旋转），否则为媒体包。
@@ -241,7 +246,12 @@ mod tests {
         header[0..8].copy_from_slice(&pts_and_flags.to_be_bytes());
         header[8..12].copy_from_slice(&55812u32.to_be_bytes());
         match parse_video_header(&header) {
-            VideoHeader::Media { pts, config, key_frame, size } => {
+            VideoHeader::Media {
+                pts,
+                config,
+                key_frame,
+                size,
+            } => {
                 assert_eq!((pts, config, key_frame, size), (1000, false, true, 55812));
             }
             _ => panic!("expected media"),

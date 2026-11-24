@@ -2262,6 +2262,7 @@ dependencies = [
  "winapi",
  "windows 0.62.2",
  "windows-capture",
+ "windows-core 0.62.2",
  "xxhash-rust",
  "zip 8.6.0",
 ]

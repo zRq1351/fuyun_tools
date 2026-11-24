@@ -241,7 +241,11 @@ pub async fn mirror_export_recent(
     let save = save_dir.clone();
     let res = tauri::async_runtime::spawn_blocking(move || -> Result<serde_json::Value, String> {
         let mut exported: Vec<String> = Vec::new();
-        let dirs = ["/sdcard/DCIM/Camera", "/sdcard/Pictures/Screenshots", "/sdcard/Pictures"];
+        let dirs = [
+            "/sdcard/DCIM/Camera",
+            "/sdcard/Pictures/Screenshots",
+            "/sdcard/Pictures",
+        ];
         for dir in dirs {
             let out = match adb::run_adb(
                 &adb,
@@ -300,12 +304,20 @@ pub async fn mirror_list_phone_files(_app: AppHandle) -> Result<serde_json::Valu
     let adb = adb_path.clone();
     let serial2 = serial.clone();
     let res = tauri::async_runtime::spawn_blocking(move || -> Result<serde_json::Value, String> {
-        let dirs = ["/sdcard/DCIM/Camera", "/sdcard/Pictures/Screenshots", "/sdcard/Download"];
+        let dirs = [
+            "/sdcard/DCIM/Camera",
+            "/sdcard/Pictures/Screenshots",
+            "/sdcard/Download",
+        ];
         let mut files: Vec<serde_json::Value> = Vec::new();
         for dir in dirs {
             let cmd = format!("ls -l -t {} 2>/dev/null | head -30", dir);
-            let text = adb::run_adb(&adb, &["-s", &serial2, "shell", &cmd], Duration::from_secs(15))
-                .unwrap_or_default();
+            let text = adb::run_adb(
+                &adb,
+                &["-s", &serial2, "shell", &cmd],
+                Duration::from_secs(15),
+            )
+            .unwrap_or_default();
             for line in text.lines() {
                 let t: Vec<&str> = line.split_whitespace().collect();
                 // toybox ls -l: 权限 数 链 owner group size date time name...
@@ -387,6 +399,23 @@ pub async fn mirror_pull_files(
     .await
     .map_err(|e| format!("拉取任务失败: {}", e))??;
     Ok(res)
+}
+
+/// 拖拽导出：把手机文件作为虚拟文件拖到资源管理器/桌面（DoDragDrop + 延迟 adb pull）。
+#[tauri::command]
+pub async fn mirror_drag_export(items: Vec<super::dragout::DragItem>) -> Result<(), String> {
+    if items.is_empty() {
+        return Err("未选择任何文件".into());
+    }
+    let (adb_path, serial) = {
+        let guard = state().session.lock().unwrap();
+        match guard.as_ref() {
+            Some(s) => (s.adb_path.clone(), s.serial.clone()),
+            None => return Err("投屏会话未运行".into()),
+        }
+    };
+    log::info!("[mirror-drag] 开始拖拽导出 {} 个文件", items.len());
+    super::dragout::begin_drag(adb_path, serial, items)
 }
 
 /// 停止会话（供窗口销毁/退出时调用）。
