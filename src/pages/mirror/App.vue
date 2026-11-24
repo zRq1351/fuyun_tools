@@ -1,13 +1,19 @@
 <template>
   <div class="mirror-page">
     <div class="toolbar">
-      <span
-        class="status"
-        :class="{ connected: connected }"
-      >
-        {{ statusText }}
-      </span>
-      <span class="diag">{{ diag.recv }} / {{ diag.decoded }}</span>
+      <div class="toolbar-left">
+        <span
+          class="status"
+          :class="{ connected: connected }"
+        >
+          <span class="dot" />
+          {{ statusText }}
+        </span>
+        <span
+          v-if="connected"
+          class="diag"
+        >{{ diag.recv }} / {{ diag.decoded }}</span>
+      </div>
       <div class="actions">
         <button
           class="btn"
@@ -15,7 +21,7 @@
           title="返回"
           @click="sendBack"
         >
-          返回
+          <svg viewBox="0 0 24 24"><path d="M15.5 4.5 8 12l7.5 7.5" /></svg>
         </button>
         <button
           class="btn"
@@ -23,7 +29,11 @@
           title="主页"
           @click="sendHome"
         >
-          主页
+          <svg viewBox="0 0 24 24"><circle
+            cx="12"
+            cy="12"
+            r="7.5"
+          /></svg>
         </button>
         <button
           class="btn"
@@ -31,22 +41,31 @@
           title="最近任务"
           @click="sendRecents"
         >
-          多任务
+          <svg viewBox="0 0 24 24"><rect
+            x="5"
+            y="5"
+            width="14"
+            height="14"
+            rx="2.5"
+          /></svg>
         </button>
+        <span class="divider" />
         <button
           class="btn"
           :disabled="!connected"
           title="旋转屏幕"
           @click="sendRotate"
         >
-          旋转
+          <svg viewBox="0 0 24 24"><path d="M4.5 9a8 8 0 0 1 14.3-2.6M19.5 15a8 8 0 0 1-14.3 2.6M18.8 3.2v3.4h-3.4M5.2 20.8v-3.4h3.4" /></svg>
         </button>
         <button
           class="btn danger"
           :disabled="!connected"
+          title="断开投屏"
           @click="disconnect"
         >
-          断开
+          <svg viewBox="0 0 24 24"><path d="M12 3v8M6.3 6.7a8 8 0 1 0 11.4 0" /></svg>
+          <span class="btn-text">断开</span>
         </button>
       </div>
     </div>
@@ -55,21 +74,34 @@
       ref="stageRef"
       class="stage"
     >
-      <canvas
-        ref="canvasRef"
-        class="screen"
+      <div
+        class="device"
         :class="{ live: connected }"
-        @pointerdown="onPointerDown"
-        @pointermove="onPointerMove"
-        @pointerup="onPointerUp"
-        @pointercancel="onPointerUp"
-        @wheel.prevent="onWheel"
-        @contextmenu.prevent
-      />
+      >
+        <canvas
+          ref="canvasRef"
+          class="screen"
+          @pointerdown="onPointerDown"
+          @pointermove="onPointerMove"
+          @pointerup="onPointerUp"
+          @pointercancel="onPointerUp"
+          @wheel.prevent="onWheel"
+          @contextmenu.prevent
+        />
+      </div>
       <div
         v-if="!connected"
         class="placeholder"
       >
+        <div class="placeholder-icon">
+          <svg viewBox="0 0 24 24"><rect
+            x="7"
+            y="2.5"
+            width="10"
+            height="19"
+            rx="2.5"
+          /><path d="M10.5 19h3" /></svg>
+        </div>
         <template v-if="errorMsg">
           {{ errorMsg }}
         </template>
@@ -411,7 +443,7 @@ onUnmounted(() => {
   height: 100vh;
   display: flex;
   flex-direction: column;
-  background: #101418;
+  background: radial-gradient(ellipse at 50% -20%, #1a222c 0%, #0b0e12 60%);
   color: #dfe5ec;
   font-family: 'Segoe UI', 'Microsoft YaHei', sans-serif;
   user-select: none;
@@ -421,10 +453,18 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 6px 10px;
-  background: #171c22;
-  border-bottom: 1px solid #242b33;
+  padding: 8px 14px;
+  background: rgba(20, 24, 30, 0.85);
+  border-bottom: 1px solid #20262e;
   flex: 0 0 auto;
+  backdrop-filter: blur(6px);
+}
+
+.toolbar-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
 }
 
 .status {
@@ -432,83 +472,174 @@ onUnmounted(() => {
   color: #8a97a5;
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
+  padding: 4px 12px;
+  border-radius: 999px;
+  background: #171c22;
+  border: 1px solid #242b33;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.status .dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #5b6773;
+  flex: 0 0 auto;
 }
 
 .status.connected {
-  color: #4cd47c;
+  color: #dfe5ec;
+  border-color: #2a4a37;
+}
+
+.status.connected .dot {
+  background: #4cd47c;
+  box-shadow: 0 0 6px #4cd47c;
+  animation: pulse 2s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.45; }
 }
 
 .diag {
   font-size: 11px;
   color: #5b6773;
-  margin-left: 8px;
   font-family: Consolas, monospace;
-}
-
-.status.connected::before {
-  content: '';
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: #4cd47c;
+  white-space: nowrap;
 }
 
 .actions {
   display: flex;
+  align-items: center;
   gap: 6px;
 }
 
 .btn {
-  background: #232a32;
-  color: #dfe5ec;
-  border: 1px solid #2f3945;
-  border-radius: 6px;
-  padding: 4px 12px;
-  font-size: 13px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 34px;
+  height: 30px;
+  background: #1a2027;
+  color: #b7c2cd;
+  border: 1px solid #262f39;
+  border-radius: 8px;
   cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+
+.btn svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
 .btn:hover:not(:disabled) {
-  background: #2c3540;
+  background: #242d37;
+  color: #ffffff;
+  border-color: #3a4552;
+}
+
+.btn:active:not(:disabled) {
+  background: #2c3742;
+  transform: translateY(1px);
 }
 
 .btn:disabled {
-  opacity: 0.45;
+  opacity: 0.35;
   cursor: default;
 }
 
 .btn.danger {
-  border-color: #5a3131;
-  color: #ff9d9d;
+  width: auto;
+  padding: 0 12px;
+  color: #ff8f8f;
+  border-color: #4a2c2c;
+}
+
+.btn.danger:hover:not(:disabled) {
+  background: #33201f;
+  color: #ffb3b3;
+  border-color: #6e3a3a;
+}
+
+.btn-text {
+  font-size: 13px;
+}
+
+.divider {
+  width: 1px;
+  height: 18px;
+  background: #2a323c;
+  margin: 0 4px;
 }
 
 .stage {
   flex: 1;
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: center;
   overflow: hidden;
-  background: #101418;
+}
+
+.device {
+  display: none;
+  padding: 8px;
+  border-radius: 22px;
+  background: #05070a;
+  border: 1px solid #232a33;
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.04) inset,
+    0 18px 50px rgba(0, 0, 0, 0.55),
+    0 4px 16px rgba(0, 0, 0, 0.4);
+}
+
+.device.live {
+  display: block;
 }
 
 .screen {
-  max-width: 100%;
-  max-height: 100%;
+  display: block;
+  max-width: calc(100vw - 48px);
+  max-height: calc(100vh - 100px);
   background: #000;
   cursor: pointer;
   touch-action: none;
-}
-
-.screen:not(.live) {
-  display: none;
+  border-radius: 14px;
 }
 
 .placeholder {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
   color: #67737f;
   font-size: 14px;
   padding: 0 24px;
   text-align: center;
   line-height: 1.6;
+}
+
+.placeholder-icon svg {
+  width: 44px;
+  height: 44px;
+  fill: none;
+  stroke: #39434e;
+  stroke-width: 1.6;
+  stroke-linecap: round;
 }
 </style>
