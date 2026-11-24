@@ -175,12 +175,88 @@
           正在连接设备…
         </template>
       </div>
+      <div
+        v-if="exportOpen"
+        class="export-backdrop"
+        @click.self="exportOpen = false"
+      >
+        <div class="export-panel">
+          <div class="export-head">
+            <span class="export-title">从手机导出文件</span>
+            <button
+              class="btn"
+              title="关闭"
+              @click="exportOpen = false"
+            >
+              <svg viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18" /></svg>
+            </button>
+          </div>
+          <div class="export-list">
+            <template v-if="!exportLoading">
+              <template
+                v-for="g in exportGroups"
+                :key="g.dir"
+              >
+                <div class="export-dir">
+                  <span>{{ g.dir }}</span>
+                  <span
+                    class="sel-all"
+                    @click="toggleGroup(g)"
+                  >{{ g.allSelected ? '取消全选' : '全选' }}</span>
+                </div>
+                <label
+                  v-for="f in g.files"
+                  :key="f.path"
+                  class="export-item"
+                >
+                  <input
+                    v-model="selectedPaths"
+                    type="checkbox"
+                    :value="f.path"
+                  >
+                  <span class="fname">{{ f.name }}</span>
+                  <span class="fsize">{{ fmtSize(f.size) }}</span>
+                </label>
+                <div
+                  v-if="!g.files.length"
+                  class="export-empty"
+                >
+                  （无文件）
+                </div>
+              </template>
+            </template>
+            <div
+              v-else
+              class="export-empty"
+            >
+              正在读取手机文件列表…
+            </div>
+          </div>
+          <div class="export-foot">
+            <span class="sel-count">已选 {{ selectedPaths.length }} 项</span>
+            <button
+              class="btn"
+              title="刷新列表"
+              @click="refreshExport"
+            >
+              <svg viewBox="0 0 24 24"><path d="M4.5 9a8 8 0 0 1 14.3-2.6M19.5 15a8 8 0 0 1-14.3 2.6M18.8 3.2v3.4h-3.4M5.2 20.8v-3.4h3.4" /></svg>
+            </button>
+            <button
+              class="btn primary"
+              :disabled="!selectedPaths.length"
+              @click="confirmExport"
+            >
+              导出所选
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
 </template>
 
 <script setup>
-import { onMounted, onUnmounted, ref } from 'vue'
+import { onMounted, onUnmounted, computed, ref } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { IPC_COMMANDS } from '../../services/ipc'   
 import { getCurrentWindow } from '@tauri-apps/api/window'
@@ -205,6 +281,10 @@ const barShow = ref(true)
 const dragging = ref(false)
 const toastMsg = ref('')
 let toastTimer = null
+const exportOpen = ref(false)
+const exportLoading = ref(false)
+const phoneFiles = ref([])
+const selectedPaths = ref([])
 
 // ---- 状态 ----
 let ws = null
@@ -388,7 +468,6 @@ function videoPoint(event) {
 
 function onPointerDown(event) {
   if (!connected.value || !videoW) return
-  refocusKbd()
   canvasRef.value.setPointerCapture(event.pointerId)
   pointerDown = true
   const { x, y } = videoPoint(event)
@@ -402,6 +481,8 @@ function onPointerMove(event) {
 }
 
 function onPointerUp(event) {
+  // mousedown 的默认焦点行为会把焦点抢回 canvas，必须在 pointerup（默认行为之后）再聚焦
+  if (connected.value && videoW) refocusKbd()
   if (!connected.value || !pointerDown || !videoW) return
   pointerDown = false
   const { x, y } = videoPoint(event)
@@ -500,7 +581,7 @@ function onKbdInput() {
 
 async function handlePaste() {
   try {
-    const text = await invoke('plugin:clipboard-manager|read_text')
+    const text = await invoke(IPC_COMMANDS.CLIPBOARD_READ_TEXT)
     if (text) sendText(text)
   } catch { /* ignore */ }
 }
@@ -529,13 +610,72 @@ async function pushFile(path) {
 }
 
 async function onExport() {
+  exportOpen.value = true
+  refreshExport()
+}
+
+async function refreshExport() {
+  exportLoading.value = true
+  selectedPaths.value = []
+  try {
+    const r = await invoke(IPC_COMMANDS.MIRROR_LIST_PHONE_FILES)
+    phoneFiles.value = r.files || []
+  } catch (err) {
+    showToast(`读取手机文件列表失败：${String(err)}`, 5000)
+    phoneFiles.value = []
+  } finally {
+    exportLoading.value = false
+  }
+}
+
+const exportGroups = computed(() => {
+  const map = new Map()
+  for (const f of phoneFiles.value) {
+    if (!map.has(f.dir)) map.set(f.dir, [])
+    map.get(f.dir).push(f)
+  }
+  return [...map.entries()].map(([dir, files]) => {
+    const all = files.length > 0 && files.every((f) => selectedPaths.value.includes(f.path))
+    return { dir, files, allSelected: all }
+  })
+})
+
+function toggleGroup(g) {
+  const paths = g.files.map((f) => f.path)
+  if (g.allSelected) {
+    selectedPaths.value = selectedPaths.value.filter((p) => !paths.includes(p))
+  } else {
+    selectedPaths.value = [...new Set([...selectedPaths.value, ...paths])]
+  }
+}
+
+function fmtSize(n) {
+  if (!n) return ''
+  if (n < 1024) return `${n} B`
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`
+  if (n < 1024 * 1024 * 1024) return `${(n / 1024 / 1024).toFixed(1)} MB`
+  return `${(n / 1024 / 1024 / 1024).toFixed(2)} GB`
+}
+
+async function confirmExport() {
+  if (!selectedPaths.value.length) return
   try {
     const dir = await openDialog({ directory: true, title: '选择导出保存位置' })
     if (!dir) return
-    showToast('正在从手机导出最近文件…', 15000)
-    const r = await invoke(IPC_COMMANDS.MIRROR_EXPORT_RECENT, { saveDir: dir, count: 10 })
+    showToast(`正在导出 ${selectedPaths.value.length} 个文件…`, 20000)
+    const r = await invoke(IPC_COMMANDS.MIRROR_PULL_FILES, {
+      paths: selectedPaths.value,
+      saveDir: dir,
+    })
     const n = (r.exported || []).length
-    showToast(n > 0 ? `已导出 ${n} 个文件到 ${r.saveDir}` : '没有找到可导出的最近文件')
+    const failed = r.failed || 0
+    showToast(
+      failed > 0
+        ? `导出完成：成功 ${n} 个，失败 ${failed} 个（保存于 ${r.saveDir}）`
+        : `已导出 ${n} 个文件到 ${r.saveDir}`,
+      6000,
+    )
+    exportOpen.value = false
   } catch (err) {
     showToast(`导出失败：${String(err)}`, 5000)
   }
@@ -1010,17 +1150,18 @@ onUnmounted(() => {
   opacity: 0.6;
 }
 
-/* 键盘/IME 捕获输入框：不可见但保持焦点 */
+/* 键盘/IME 捕获输入框：不可见但保持焦点（需真实尺寸否则部分 IME 不附着） */
 .kbd-capture {
   position: fixed;
   top: 0;
   left: 0;
-  width: 1px;
-  height: 1px;
-  opacity: 0;
+  width: 40px;
+  height: 20px;
+  opacity: 0.01;
   border: none;
   padding: 0;
   pointer-events: none;
+  z-index: -1;
 }
 
 /* 拖文件悬停提示 */
@@ -1058,5 +1199,135 @@ onUnmounted(() => {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* 从手机导出文件面板 */
+.export-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  background: rgba(0, 0, 0, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.export-panel {
+  width: 88%;
+  max-height: 82%;
+  display: flex;
+  flex-direction: column;
+  background: var(--pill-bg);
+  border: 1px solid var(--pill-border);
+  border-radius: 12px;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.5);
+  overflow: hidden;
+}
+
+.export-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--pill-border);
+}
+
+.export-title {
+  font-size: 14px;
+  color: var(--text);
+}
+
+.export-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 6px 8px;
+}
+
+.export-dir {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 8px 4px;
+  font-size: 12px;
+  color: var(--muted);
+  font-family: Consolas, monospace;
+}
+
+.sel-all {
+  cursor: pointer;
+  color: var(--accent);
+}
+
+.sel-all:hover {
+  text-decoration: underline;
+}
+
+.export-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--text);
+}
+
+.export-item:hover {
+  background: var(--btn-hover-bg);
+}
+
+.export-item .fname {
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.export-item .fsize {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: 11px;
+  font-family: Consolas, monospace;
+}
+
+.export-empty {
+  padding: 14px 10px;
+  color: var(--muted);
+  font-size: 12px;
+  text-align: center;
+}
+
+.export-foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  border-top: 1px solid var(--pill-border);
+}
+
+.sel-count {
+  flex: 1;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.btn.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #08130c;
+  width: auto;
+  padding: 0 14px;
+  font-size: 13px;
+}
+
+.btn.primary:hover:not(:disabled) {
+  background: var(--accent);
+  color: #08130c;
+  opacity: 0.9;
+}
+
+.btn.primary:disabled {
+  opacity: 0.4;
 }
 </style>

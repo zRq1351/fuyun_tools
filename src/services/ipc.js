@@ -174,6 +174,11 @@ export const IPC_COMMANDS = {
     MIRROR_STATUS: 'mirror_status',
     MIRROR_PUSH_FILE: 'mirror_push_file',
     MIRROR_EXPORT_RECENT: 'mirror_export_recent',
+    MIRROR_LIST_PHONE_FILES: 'mirror_list_phone_files',
+    MIRROR_PULL_FILES: 'mirror_pull_files',
+
+    // 剪贴板插件
+    CLIPBOARD_READ_TEXT: 'plugin:clipboard-manager|read_text',
     SAVE_SCREENSHOT_TO_PATH: 'save_screenshot_to_path',
     EXPORT_SCREENSHOT_TO_PATH: 'export_screenshot_to_path',
     COPY_SCREENSHOT_TO_CLIPBOARD: 'copy_screenshot_to_clipboard',

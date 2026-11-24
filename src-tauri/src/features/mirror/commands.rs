@@ -287,6 +287,108 @@ pub async fn mirror_export_recent(
     Ok(res)
 }
 
+/// 列出手机常用目录下的最近文件（供用户在界面上勾选导出）。
+#[tauri::command]
+pub async fn mirror_list_phone_files(_app: AppHandle) -> Result<serde_json::Value, String> {
+    let (adb_path, serial) = {
+        let guard = state().session.lock().unwrap();
+        match guard.as_ref() {
+            Some(s) => (s.adb_path.clone(), s.serial.clone()),
+            None => return Err("投屏会话未运行".into()),
+        }
+    };
+    let adb = adb_path.clone();
+    let serial2 = serial.clone();
+    let res = tauri::async_runtime::spawn_blocking(move || -> Result<serde_json::Value, String> {
+        let dirs = ["/sdcard/DCIM/Camera", "/sdcard/Pictures/Screenshots", "/sdcard/Download"];
+        let mut files: Vec<serde_json::Value> = Vec::new();
+        for dir in dirs {
+            let cmd = format!("ls -l -t {} 2>/dev/null | head -30", dir);
+            let text = adb::run_adb(&adb, &["-s", &serial2, "shell", &cmd], Duration::from_secs(15))
+                .unwrap_or_default();
+            for line in text.lines() {
+                let t: Vec<&str> = line.split_whitespace().collect();
+                // toybox ls -l: 权限 数 链 owner group size date time name...
+                if t.len() < 6 || !t[0].starts_with('-') {
+                    continue;
+                }
+                let size = t[4].parse::<u64>().unwrap_or(0);
+                let name = t[7.min(t.len())..].join(" ");
+                if name.is_empty() {
+                    continue;
+                }
+                files.push(serde_json::json!({
+                    "dir": dir,
+                    "name": name,
+                    "size": size,
+                    "path": format!("{}/{}", dir, name),
+                }));
+            }
+        }
+        Ok(serde_json::json!({ "files": files }))
+    })
+    .await
+    .map_err(|e| format!("列取手机文件失败: {}", e))??;
+    Ok(res)
+}
+
+/// 按用户勾选拉取手机文件到本地目录。
+#[tauri::command]
+pub async fn mirror_pull_files(
+    _app: AppHandle,
+    paths: Vec<String>,
+    save_dir: String,
+) -> Result<serde_json::Value, String> {
+    if paths.is_empty() {
+        return Err("未选择任何文件".into());
+    }
+    let (adb_path, serial) = {
+        let guard = state().session.lock().unwrap();
+        match guard.as_ref() {
+            Some(s) => (s.adb_path.clone(), s.serial.clone()),
+            None => return Err("投屏会话未运行".into()),
+        }
+    };
+    let adb = adb_path.clone();
+    let serial2 = serial.clone();
+    let save = save_dir.clone();
+    let list = paths.clone();
+    let res = tauri::async_runtime::spawn_blocking(move || -> Result<serde_json::Value, String> {
+        let mut ok: Vec<String> = Vec::new();
+        let mut failed = 0usize;
+        for p in list {
+            let name = p.rsplit('/').next().unwrap_or("file").to_string();
+            let local = std::path::Path::new(&save).join(&name);
+            let local_str = local.to_string_lossy().to_string();
+            match adb::run_adb(
+                &adb,
+                &["-s", &serial2, "pull", &p, &local_str],
+                Duration::from_secs(300),
+            ) {
+                Ok(_) => ok.push(local_str),
+                Err(e) => {
+                    failed += 1;
+                    log::warn!("[mirror] 拉取失败 {}: {}", p, e);
+                }
+            }
+        }
+        log::info!(
+            "[mirror] 拉取完成: 成功 {} 失败 {} -> {}",
+            ok.len(),
+            failed,
+            save
+        );
+        Ok(serde_json::json!({
+            "exported": ok,
+            "failed": failed,
+            "saveDir": save,
+        }))
+    })
+    .await
+    .map_err(|e| format!("拉取任务失败: {}", e))??;
+    Ok(res)
+}
+
 /// 停止会话（供窗口销毁/退出时调用）。
 pub fn stop_session(app: &AppHandle) {
     if let Some(session) = state().session.lock().unwrap().take() {
