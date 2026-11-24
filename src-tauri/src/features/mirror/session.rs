@@ -15,6 +15,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, Arc, Mutex};
 use std::time::Duration;
 
+use tauri::Manager;
+
 use super::adb;
 use super::protocol::{self, VideoHeader};
 use super::relay::Hub;
@@ -27,15 +29,13 @@ const MAX_SIZE: u32 = 1600;
 const BIT_RATE: u32 = 8_000_000;
 /// 帧率上限
 const MAX_FPS: u32 = 30;
-/// 关键帧间隔（秒）：viewer 中途加入最多等这么久
-const I_FRAME_INTERVAL_SECS: u32 = 2;
 const DEVICE_NAME_LEN: usize = 64;
 
 pub struct SessionHandle {
     pub hub: Hub,
     pub device_name: String,
     stop_flag: Arc<AtomicBool>,
-    child: Mutex<Option<Child>>,
+    child: Arc<Mutex<Option<Child>>>,
     adb_path: PathBuf,
     serial: String,
     socket_name: String,
@@ -72,7 +72,7 @@ pub struct StartOutcome {
 
 /// 启动一次完整会话。阻塞调用（含 adb 命令与 socket 握手），应在线程池中执行。
 pub fn start(
-    _app: &tauri::AppHandle,
+    app: &tauri::AppHandle,
     hub: Hub,
     adb_path: std::path::PathBuf,
     jar_path: std::path::PathBuf,
@@ -94,101 +94,149 @@ pub fn start(
     let scid: u32 = rand_u31();
     let socket_name = format!("scrcpy_{:08x}", scid);
     let (listener, local_port) = adb::bind_local_listener()?;
-    log::info!("[mirror] 本地监听 127.0.0.1:{} socket={}", local_port, socket_name);
+    log::info!(
+        "[mirror] 本地监听 127.0.0.1:{} socket={}",
+        local_port,
+        socket_name
+    );
 
     adb::push_server(&adb_path, &serial, &jar_path)?;
     adb::enable_reverse(&adb_path, &serial, &socket_name, local_port)?;
 
+    // server 的 stdout/stderr 落盘：握手失败时有现场可查
+    let server_log = app.path().app_log_dir().ok().map(|dir| {
+        let _ = std::fs::create_dir_all(&dir);
+        dir.join("scrcpy_server.log")
+    });
+
+    // 注意：不要加 video_codec_options 之类的扩展参数——
+    // scrcpy 的 codec option 值按整数解析（"2s" 这类带后缀的值会让 server 启动即退）
     let options = format!(
         "scid={:08x} log_level=info video=true audio=false control=true \
          max_size={} video_bit_rate={} max_fps={} \
-         video_codec_options=i-frame-interval={}s \
          send_dummy_byte=false send_device_meta=true send_frame_meta=true \
          send_stream_meta=true tunnel_forward=false",
-        scid, MAX_SIZE, BIT_RATE, MAX_FPS, I_FRAME_INTERVAL_SECS
+        scid, MAX_SIZE, BIT_RATE, MAX_FPS
     );
-    let child = adb::start_server(&adb_path, &serial, &options, None)?;
+    let child = adb::start_server(&adb_path, &serial, &options, server_log.as_ref())?;
+    let child = Arc::new(Mutex::new(Some(child)));
 
-    // 依次 accept：video → control（audio=false 时只有这两个）
-    let mut video = accept_with_timeout(&listener, Duration::from_secs(15))
-        .ok_or_else(|| {
-            log::error!("[mirror] 等待设备视频连接超时（15s）");
-            "等待设备视频连接超时（server 未响应，可查看日志）".to_string()
-        })?;
-    let mut control = accept_with_timeout(&listener, Duration::from_secs(10))
-        .ok_or_else(|| {
-            log::error!("[mirror] 等待设备控制连接超时（10s）");
-            "等待设备控制连接超时".to_string()
-        })?;
-    video.set_nodelay(true).ok();
-    control.set_nodelay(true).ok();
-    // 读（设备回传）与写（控制指令）分离，避免两个线程争抢同一句柄
-    let mut control_read = control.try_clone().map_err(|e| format!("克隆控制连接失败: {}", e))?;
+    // 失败清理所需的独立副本（build 闭包会把原值移入 SessionHandle）
+    let cleanup_adb = adb_path.clone();
+    let cleanup_serial = serial.clone();
+    let cleanup_socket = socket_name.clone();
+    let cleanup_child = child.clone();
 
-    // 设备元数据：64 字节 UTF-8 设备名（仅在第一个 socket 上发送）
-    let device_name = read_device_meta(&mut video)?;
+    let build = || -> Result<SessionHandle, String> {
+        // 依次 accept：video → control（audio=false 时只有这两个）
+        let mut video = accept_with_timeout(&listener, Duration::from_secs(15))
+            .ok_or_else(|| {
+                log::error!("[mirror] 等待设备视频连接超时（15s）");
+                "等待设备视频连接超时（server 未响应，可查看日志）".to_string()
+            })?;
+        let mut control = accept_with_timeout(&listener, Duration::from_secs(10))
+            .ok_or_else(|| {
+                log::error!("[mirror] 等待设备控制连接超时（10s）");
+                "等待设备控制连接超时".to_string()
+            })?;
+        video.set_nodelay(true).ok();
+        control.set_nodelay(true).ok();
+        // 读（设备回传）与写（控制指令）分离，避免两个线程争抢同一句柄
+        let mut control_read =
+            control.try_clone().map_err(|e| format!("克隆控制连接失败: {}", e))?;
 
-    let (control_tx, control_rx) = mpsc::channel::<Vec<u8>>();
-    let stop_flag = Arc::new(AtomicBool::new(false));
+        // 设备元数据：64 字节 UTF-8 设备名（仅在第一个 socket 上发送）
+        let device_name = read_device_meta(&mut video)?;
 
-    hub.send_text(
-        serde_json::json!({"type": "device", "name": device_name}).to_string(),
-    );
+        let (control_tx, control_rx) = mpsc::channel::<Vec<u8>>();
+        let stop_flag = Arc::new(AtomicBool::new(false));
 
-    // video 读线程：解析帧头 → 广播 H264 负载
-    {
-        let hub = hub.clone();
-        let stop_flag = stop_flag.clone();
-        std::thread::Builder::new()
-            .name("mirror-video-reader".into())
-            .spawn(move || {
-                run_video_reader(&mut video, &hub, &stop_flag);
-            })
-            .map_err(|e| e.to_string())?;
-    }
+        hub.send_text(
+            serde_json::json!({"type": "device", "name": device_name}).to_string(),
+        );
 
-    // 设备回传消息消费线程（v1 仅按格式丢弃，保证字节流不错位）
-    {
-        let stop_flag = stop_flag.clone();
-        std::thread::Builder::new()
-            .name("mirror-device-msg-reader".into())
-            .spawn(move || {
-                run_device_msg_reader(&mut control_read, &stop_flag);
-            })
-            .map_err(|e| e.to_string())?;
-    }
+        // video 读线程：解析帧头 → 广播 H264 负载
+        {
+            let hub = hub.clone();
+            let stop_flag = stop_flag.clone();
+            std::thread::Builder::new()
+                .name("mirror-video-reader".into())
+                .spawn(move || {
+                    run_video_reader(&mut video, &hub, &stop_flag);
+                })
+                .map_err(|e| e.to_string())?;
+        }
 
-    // 控制写线程
-    {
-        let stop_flag = stop_flag.clone();
-        std::thread::Builder::new()
-            .name("mirror-control-writer".into())
-            .spawn(move || {
-                while !stop_flag.load(Ordering::SeqCst) {
-                    match control_rx.recv_timeout(Duration::from_millis(500)) {
-                        Ok(bytes) => {
-                            if control.write_all(&bytes).is_err() {
-                                break;
+        // 设备回传消息消费线程（v1 仅按格式丢弃，保证字节流不错位）
+        {
+            let stop_flag = stop_flag.clone();
+            std::thread::Builder::new()
+                .name("mirror-device-msg-reader".into())
+                .spawn(move || {
+                    run_device_msg_reader(&mut control_read, &stop_flag);
+                })
+                .map_err(|e| e.to_string())?;
+        }
+
+        // 控制写线程
+        {
+            let stop_flag = stop_flag.clone();
+            std::thread::Builder::new()
+                .name("mirror-control-writer".into())
+                .spawn(move || {
+                    while !stop_flag.load(Ordering::SeqCst) {
+                        match control_rx.recv_timeout(Duration::from_millis(500)) {
+                            Ok(bytes) => {
+                                if control.write_all(&bytes).is_err() {
+                                    break;
+                                }
                             }
+                            Err(mpsc::RecvTimeoutError::Timeout) => continue,
+                            Err(_) => break,
                         }
-                        Err(mpsc::RecvTimeoutError::Timeout) => continue,
-                        Err(_) => break,
                     }
-                }
-            })
-            .map_err(|e| e.to_string())?;
-    }
+                })
+                .map_err(|e| e.to_string())?;
+        }
 
-    Ok(SessionHandle {
-        hub,
-        device_name,
-        stop_flag,
-        child: Mutex::new(Some(child)),
-        adb_path,
-        serial,
-        socket_name,
-        control_tx,
-    })
+        Ok(SessionHandle {
+            hub,
+            device_name,
+            stop_flag,
+            child,
+            adb_path,
+            serial,
+            socket_name,
+            control_tx,
+        })
+    };
+
+    match build() {
+        Ok(handle) => {
+            log::info!(
+                "[mirror] 会话握手完成: 设备={} 本地端口={}",
+                handle.device_name,
+                local_port
+            );
+            Ok(handle)
+        }
+        Err(e) => {
+            log::error!(
+                "[mirror] 会话建立失败: {}（server 输出见 scrcpy_server.log）",
+                e
+            );
+            // 失败清理：撤隧道 + 杀 server 进程
+            adb::disable_reverse(&cleanup_adb, &cleanup_serial, &cleanup_socket);
+            if let Ok(mut guard) = cleanup_child.lock() {
+                if let Some(c) = guard.as_mut() {
+                    let _ = c.kill();
+                    let _ = c.wait();
+                }
+                *guard = None;
+            }
+            Err(e)
+        }
+    }
 }
 
 fn rand_u31() -> u32 {
