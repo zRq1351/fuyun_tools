@@ -78,15 +78,23 @@ pub fn start(
     jar_path: std::path::PathBuf,
 ) -> Result<SessionHandle, String> {
     let serials = adb::list_device_serials(&adb_path)?;
+    log::info!("[mirror] 发现设备: {:?}", serials);
     let serial = match serials.len() {
-        0 => return Err("未检测到已连接的安卓设备（请用 USB 连接并授权调试）".into()),
+        0 => {
+            log::error!("[mirror] 未检测到已连接的安卓设备");
+            return Err("未检测到已连接的安卓设备（请用 USB 连接并授权调试）".into());
+        }
         1 => serials[0].clone(),
-        _ => return Err(format!("检测到多台设备（{} 台），暂不支持选择", serials.len())),
+        _ => {
+            log::error!("[mirror] 检测到 {} 台设备，暂不支持选择", serials.len());
+            return Err(format!("检测到多台设备（{} 台），暂不支持选择", serials.len()));
+        }
     };
 
     let scid: u32 = rand_u31();
     let socket_name = format!("scrcpy_{:08x}", scid);
     let (listener, local_port) = adb::bind_local_listener()?;
+    log::info!("[mirror] 本地监听 127.0.0.1:{} socket={}", local_port, socket_name);
 
     adb::push_server(&adb_path, &serial, &jar_path)?;
     adb::enable_reverse(&adb_path, &serial, &socket_name, local_port)?;
@@ -103,9 +111,15 @@ pub fn start(
 
     // 依次 accept：video → control（audio=false 时只有这两个）
     let mut video = accept_with_timeout(&listener, Duration::from_secs(15))
-        .ok_or("等待设备视频连接超时（server 未响应，可查看日志）")?;
+        .ok_or_else(|| {
+            log::error!("[mirror] 等待设备视频连接超时（15s）");
+            "等待设备视频连接超时（server 未响应，可查看日志）".to_string()
+        })?;
     let mut control = accept_with_timeout(&listener, Duration::from_secs(10))
-        .ok_or("等待设备控制连接超时")?;
+        .ok_or_else(|| {
+            log::error!("[mirror] 等待设备控制连接超时（10s）");
+            "等待设备控制连接超时".to_string()
+        })?;
     video.set_nodelay(true).ok();
     control.set_nodelay(true).ok();
     // 读（设备回传）与写（控制指令）分离，避免两个线程争抢同一句柄
@@ -230,7 +244,10 @@ fn read_exact_loop(stream: &mut TcpStream, buf: &mut [u8]) -> std::io::Result<()
 
 fn read_device_meta(video: &mut TcpStream) -> Result<String, String> {
     let mut buf = [0u8; DEVICE_NAME_LEN];
-    read_exact_loop(video, &mut buf).map_err(|e| format!("读取设备元数据失败: {}", e))?;
+    if let Err(e) = read_exact_loop(video, &mut buf) {
+        log::error!("[mirror] 读取设备元数据失败: {}", e);
+        return Err(format!("读取设备元数据失败: {}", e));
+    }
     let end = buf.iter().position(|b| *b == 0).unwrap_or(DEVICE_NAME_LEN);
     Ok(String::from_utf8_lossy(&buf[..end]).to_string())
 }

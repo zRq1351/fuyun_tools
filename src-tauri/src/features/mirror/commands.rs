@@ -71,8 +71,14 @@ pub async fn mirror_start(app: AppHandle) -> Result<serde_json::Value, String> {
         }));
     }
 
-    let adb_path = adb::resolve_adb(Some(&app))?;
-    let jar = jar_path(&app)?;
+    let adb_path = adb::resolve_adb(Some(&app)).map_err(|e| {
+        log::error!("[mirror] {}", e);
+        e
+    })?;
+    let jar = jar_path(&app).map_err(|e| {
+        log::error!("[mirror] {}", e);
+        e
+    })?;
 
     let hub = Hub::new();
     // 会话启动是阻塞流程（adb + 握手），放线程池
@@ -94,6 +100,11 @@ pub async fn mirror_start(app: AppHandle) -> Result<serde_json::Value, String> {
     *state().session.lock().unwrap() = Some(handle);
 
     super::window::show_mirror_window(&app)?;
+    log::info!(
+        "[mirror] 会话已建立: 设备={} 中继端口={} 窗口已打开",
+        device_name,
+        relay_port
+    );
 
     Ok(serde_json::json!({
         "relayPort": relay_port,

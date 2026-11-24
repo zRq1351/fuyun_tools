@@ -7,8 +7,23 @@ use std::net::TcpListener;
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
+
 use tauri::Manager;
 use std::time::Duration;
+
+/// Windows 下不弹出控制台黑框。
+#[cfg(windows)]
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
+#[cfg(windows)]
+fn hide_console(cmd: &mut Command) {
+    cmd.creation_flags(CREATE_NO_WINDOW);
+}
+
+#[cfg(not(windows))]
+fn hide_console(_cmd: &mut Command) {}
 
 /// 依序探测 adb：随包资源 → PATH → 常见 SDK 位置。
 pub fn resolve_adb(app: Option<&tauri::AppHandle>) -> Result<PathBuf, String> {
@@ -59,25 +74,34 @@ fn run_adb(adb: &std::path::Path, args: &[&str], timeout: Duration) -> Result<St
     let args: Vec<String> = args.iter().map(|s| s.to_string()).collect();
     let (tx, rx) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
-        let output = Command::new(&adb)
-            .args(&args)
+        let mut cmd = Command::new(&adb);
+        cmd.args(&args)
             .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .output();
+            .stderr(Stdio::piped());
+        hide_console(&mut cmd);
+        let output = cmd.output();
         let _ = tx.send(output);
     });
     let output = rx
         .recv_timeout(timeout)
-        .map_err(|_| format!("{} 超时", args_msg))?
-        .map_err(|e| format!("启动 adb 失败: {}", e))?;
+        .map_err(|_| {
+            log::error!("[mirror] {} 超时", args_msg);
+            format!("{} 超时", args_msg)
+        })?
+        .map_err(|e| {
+            log::error!("[mirror] 启动 adb 失败: {}", e);
+            format!("启动 adb 失败: {}", e)
+        })?;
 
     if !output.status.success() {
-        return Err(format!(
+        let msg = format!(
             "{} 失败({}): {}",
             args_msg,
             output.status,
             String::from_utf8_lossy(&output.stderr).trim()
-        ));
+        );
+        log::error!("[mirror] {}", msg);
+        return Err(msg);
     }
     Ok(String::from_utf8_lossy(&output.stdout).to_string())
 }
@@ -150,12 +174,16 @@ pub fn start_server(
         ),
         None => (Stdio::null(), Stdio::null()),
     };
-    Command::new(adb)
-        .args(["-s", serial, "shell", &shell_cmd])
+    let mut cmd = Command::new(adb);
+    cmd.args(["-s", serial, "shell", &shell_cmd])
         .stdout(stdout)
-        .stderr(stderr)
-        .spawn()
-        .map_err(|e| format!("启动 scrcpy server 失败: {}", e))
+        .stderr(stderr);
+    hide_console(&mut cmd);
+    cmd.spawn()
+        .map_err(|e| {
+            log::error!("[mirror] 启动 scrcpy server 失败: {}", e);
+            format!("启动 scrcpy server 失败: {}", e)
+        })
 }
 
 /// 在随机端口上监听本机回环，等待 scrcpy server 反向连入。
