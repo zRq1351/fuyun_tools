@@ -33,7 +33,7 @@ pub fn ensure_mirror_window(app: &AppHandle) -> Result<tauri::WebviewWindow, Str
     .minimizable(true)
     .maximizable(false)
     .inner_size(432.0, 912.0)
-    .min_inner_size(360.0, 640.0)
+    .min_inner_size(288.0, 288.0) // 允许横屏（视频全屏时窗口自动横竖切换）
     .build()
     .map_err(|e| format!("创建投屏窗口失败: {}", e))?;
     bind_mirror_window_events(&window, app.clone());

@@ -134,6 +134,7 @@ import { onMounted, onUnmounted, reactive, ref } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { IPC_COMMANDS } from '../../services/ipc'   
 import { getCurrentWindow } from '@tauri-apps/api/window'
+import { LogicalSize } from '@tauri-apps/api/dpi'
 import { useTheme } from '../../composables/useTheme'
 import { initTheme } from '../../utils/themeManager'
 
@@ -377,6 +378,26 @@ async function minimizeWindow() {
   try { await getCurrentWindow().minimize() } catch { /* ignore */ }
 }
 
+// ---- 窗口随视频方向横竖切换 ----
+async function syncWindowOrientation() {
+  if (!videoW || !videoH) return
+  const wantLandscape = videoW > videoH
+  const win = getCurrentWindow()
+  try {
+    const size = await win.innerSize()
+    const scale = await win.scaleFactor()
+    const curW = size.width / scale
+    const curH = size.height / scale
+    const isLandscape = curW > curH
+    if (isLandscape !== wantLandscape) {
+      // 宽高互换，保持用户当前窗口大小比例
+      const w = Math.max(288, Math.round(curH))
+      const h = Math.max(288, Math.round(curW))
+      await win.setSize(new LogicalSize(w, h))
+    }
+  } catch { /* 窗口操作失败不影响画面 */ }
+}
+
 // ---- WS 生命周期 ----
 function handleText(text) {
   let msg
@@ -388,10 +409,13 @@ function handleText(text) {
     case 'codec':
       // h264 确认，等待 session/config
       break
-    case 'session':
+    case 'session': {
+      const changed = videoW !== msg.width || videoH !== msg.height
       videoW = msg.width
       videoH = msg.height
+      if (changed) syncWindowOrientation()
       break
+    }
     case 'stopped':
       connected.value = false
       statusText.value = '已断开'
