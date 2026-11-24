@@ -2,6 +2,7 @@
 
 use std::sync::atomic::{AtomicU16, Ordering};
 use std::sync::{Mutex, OnceLock};
+use std::time::Duration;
 
 use tauri::{AppHandle, Manager};
 
@@ -130,6 +131,92 @@ pub async fn mirror_status(_app: AppHandle) -> Result<serde_json::Value, String>
         "relayPort": port,
         "deviceName": session.as_ref().map(|s| s.device_name.clone()),
         "version": SCRCPY_VERSION,
+    }))
+}
+
+/// 拖拽文件到投屏窗口：adb push 到手机公共目录并触发媒体扫描。
+#[tauri::command]
+pub async fn mirror_push_file(_app: AppHandle, path: String) -> Result<serde_json::Value, String> {
+    let (adb_path, serial) = {
+        let guard = state().session.lock().unwrap();
+        match guard.as_ref() {
+            Some(s) => (s.adb_path.clone(), s.serial.clone()),
+            None => return Err("投屏会话未运行".into()),
+        }
+    };
+    let src = std::path::PathBuf::from(&path);
+    if !src.exists() {
+        return Err(format!("文件不存在: {}", path));
+    }
+    let name = src
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_else(|| "file".into());
+    let ext = src
+        .extension()
+        .map(|e| e.to_string_lossy().to_lowercase())
+        .unwrap_or_default();
+    let is_image = matches!(
+        ext.as_str(),
+        "jpg" | "jpeg" | "png" | "gif" | "webp" | "bmp" | "heic"
+    );
+    let dest_dir = if is_image {
+        "/sdcard/Pictures/FuyunMirror"
+    } else {
+        "/sdcard/Download/FuyunMirror"
+    };
+
+    // push 可能耗时（大文件），放线程池
+    let adb = adb_path.clone();
+    let serial2 = serial.clone();
+    let path2 = path.clone();
+    let name2 = name.clone();
+    let dest_dir2 = dest_dir.to_string();
+    let dest = tauri::async_runtime::spawn_blocking(move || -> Result<String, String> {
+        adb::run_adb(
+            &adb,
+            &["-s", &serial2, "shell", "mkdir", "-p", &dest_dir2],
+            Duration::from_secs(10),
+        )?;
+        let dest = format!("{}/{}", dest_dir2, name2);
+        adb::run_adb(
+            &adb,
+            &["-s", &serial2, "push", &path2, &dest],
+            Duration::from_secs(600),
+        )?;
+        Ok(dest)
+    })
+    .await
+    .map_err(|e| format!("推送任务失败: {}", e))??;
+
+    // 媒体扫描（尽力而为：失败不影响文件已落地）
+    let adb3 = adb_path;
+    let serial3 = serial;
+    let dest2 = dest.clone();
+    let _ = tauri::async_runtime::spawn_blocking(move || {
+        let _ = adb::run_adb(
+            &adb3,
+            &[
+                "-s",
+                &serial3,
+                "shell",
+                "am",
+                "broadcast",
+                "-a",
+                "android.intent.action.MEDIA_SCANNER_SCAN_FILE",
+                "-d",
+                &format!("file://{}", dest2),
+            ],
+            Duration::from_secs(15),
+        );
+    })
+    .await;
+
+    log::info!("[mirror] 文件已推送: {} -> {}", path, dest);
+    Ok(serde_json::json!({
+        "dest": dest,
+        "name": name,
+        "isImage": is_image,
     }))
 }
 

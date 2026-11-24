@@ -127,6 +127,28 @@
           @contextmenu.prevent
         />
       </div>
+      <input
+        ref="kbdRef"
+        class="kbd-capture"
+        type="text"
+        autocomplete="off"
+        @compositionend="onCompositionEnd"
+        @keydown="onKbdKey"
+        @input="onKbdInput"
+        @paste.prevent="onPaste"
+      >
+      <div
+        v-if="dragging"
+        class="drag-overlay"
+      >
+        松开传输到手机
+      </div>
+      <div
+        v-if="toastMsg"
+        class="toast"
+      >
+        {{ toastMsg }}
+      </div>
       <div
         v-if="!connected"
         class="placeholder"
@@ -156,20 +178,26 @@ import { onMounted, onUnmounted, ref } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { IPC_COMMANDS } from '../../services/ipc'   
 import { getCurrentWindow } from '@tauri-apps/api/window'
+import { getCurrentWebview } from '@tauri-apps/api/webview'
 import { LogicalSize } from '@tauri-apps/api/dpi'
 import { useTheme } from '../../composables/useTheme'
 import { initTheme } from '../../utils/themeManager'
 
 const { currentTheme: theme } = useTheme()
 let unlistenResize = null
+let unlistenDrag = null
 
 const stageRef = ref(null)
 const canvasRef = ref(null)
+const kbdRef = ref(null)
 const connected = ref(false)
 const errorMsg = ref('')
 const statusText = ref('未连接')
 const isFs = ref(false)
 const barShow = ref(true)
+const dragging = ref(false)
+const toastMsg = ref('')
+let toastTimer = null
 
 // ---- 状态 ----
 let ws = null
@@ -353,6 +381,7 @@ function videoPoint(event) {
 
 function onPointerDown(event) {
   if (!connected.value || !videoW) return
+  refocusKbd()
   canvasRef.value.setPointerCapture(event.pointerId)
   pointerDown = true
   const { x, y } = videoPoint(event)
@@ -390,6 +419,86 @@ const sendBack = () => sendKeycode(4)       // KEYCODE_BACK
 const sendHome = () => sendKeycode(3)       // KEYCODE_HOME
 const sendRecents = () => sendKeycode(187)  // KEYCODE_APP_SWITCH
 const sendRotate = () => sendControl({ kind: 'rotate' })
+
+// ---- 电脑键盘输入文字 ----
+// scrcpy 单条 INJECT_TEXT 上限 300 字符，按码点分块
+function sendText(text) {
+  if (!text || !connected.value) return
+  const chars = [...text]
+  for (let i = 0; i < chars.length; i += 200) {
+    sendControl({ kind: 'text', text: chars.slice(i, i + 200).join('') })
+  }
+}
+
+// 特殊键 → Android keycode（Enter/Backspace/方向键等）
+const KEY_MAP = {
+  Enter: 66,
+  Backspace: 67,
+  Tab: 61,
+  Delete: 112,
+  ArrowUp: 19,
+  ArrowDown: 20,
+  ArrowLeft: 21,
+  ArrowRight: 22,
+  Home: 122,
+  End: 123,
+  PageUp: 92,
+  PageDown: 93,
+}
+
+function onKbdKey(e) {
+  if (!connected.value) return
+  if (e.isComposing || e.key === 'Process') return // IME 组合中，等 compositionend
+  if (e.ctrlKey || e.metaKey || e.altKey) return
+  if (e.key.length === 1) {
+    e.preventDefault()
+    sendText(e.key)
+    return
+  }
+  const code = KEY_MAP[e.key]
+  if (code) {
+    e.preventDefault()
+    sendKeycode(code)
+  }
+}
+
+function onCompositionEnd(e) {
+  sendText(e.data)
+  if (kbdRef.value) kbdRef.value.value = ''
+}
+
+function onKbdInput() {
+  // 输入框只作键盘/IME 捕获面，内容即取即清
+  if (kbdRef.value) kbdRef.value.value = ''
+}
+
+function onPaste(e) {
+  const text = e.clipboardData?.getData('text')
+  if (text) sendText(text)
+}
+
+function refocusKbd() {
+  if (connected.value && kbdRef.value) kbdRef.value.focus({ preventScroll: true })
+}
+
+// ---- 拖文件/图片到窗口：adb push 到手机 ----
+function showToast(msg, ms = 3000) {
+  toastMsg.value = msg
+  if (toastTimer) clearTimeout(toastTimer)
+  toastTimer = setTimeout(() => { toastMsg.value = '' }, ms)
+}
+
+async function pushFile(path) {
+  if (!connected.value) return
+  const name = path.split(/[\\/]/).pop() || path
+  showToast(`正在传输 ${name} …`, 10000)
+  try {
+    const r = await invoke(IPC_COMMANDS.MIRROR_PUSH_FILE, { path })
+    showToast(`已传输到手机：${r.dest}`)
+  } catch (err) {
+    showToast(`传输失败：${String(err)}`, 5000)
+  }
+}
 
 async function closeWindow() {
   stopped = true
@@ -525,6 +634,21 @@ onMounted(async () => {
   } catch { /* ignore */ }
   window.addEventListener('keydown', onKeydown)
   try {
+    unlistenDrag = await getCurrentWebview().onDragDropEvent((ev) => {
+      const p = ev.payload
+      if (p.type === 'over') {
+        dragging.value = connected.value
+      } else if (p.type === 'drop') {
+        dragging.value = false
+        ;(p.paths || []).forEach((f) => pushFile(f))
+      } else {
+        dragging.value = false
+      }
+    })
+  } catch { /* ignore */ }
+  refocusKbd()
+  window.addEventListener('focus', refocusKbd)
+  try {
     const info = await invoke(IPC_COMMANDS.MIRROR_START)
     connectWebSocket(info.relayPort)
   } catch (e) {
@@ -537,7 +661,10 @@ onMounted(async () => {
 onUnmounted(() => {
   stopped = true
   if (unlistenResize) { unlistenResize(); unlistenResize = null }
+  if (unlistenDrag) { unlistenDrag(); unlistenDrag = null }
   window.removeEventListener('keydown', onKeydown)
+  window.removeEventListener('focus', refocusKbd)
+  if (toastTimer) clearTimeout(toastTimer)
   if (ws) { try { ws.close() } catch { /* ignore */ } ws = null }
   if (decoder) { try { decoder.close() } catch { /* ignore */ } decoder = null }
 })
@@ -845,5 +972,55 @@ onUnmounted(() => {
   stroke-width: 1.6;
   stroke-linecap: round;
   opacity: 0.6;
+}
+
+/* 键盘/IME 捕获输入框：不可见但保持焦点 */
+.kbd-capture {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  border: none;
+  padding: 0;
+  pointer-events: none;
+}
+
+/* 拖文件悬停提示 */
+.drag-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(10, 30, 20, 0.55);
+  color: #fff;
+  font-size: 18px;
+  letter-spacing: 2px;
+  pointer-events: none;
+  border: 2px dashed var(--accent);
+  border-radius: 14px;
+}
+
+/* 操作提示 toast */
+.toast {
+  position: absolute;
+  bottom: 18px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 30;
+  max-width: 80%;
+  padding: 8px 16px;
+  border-radius: 8px;
+  background: rgba(15, 22, 28, 0.92);
+  color: #dfe5ec;
+  font-size: 13px;
+  border: 1px solid #2a323c;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 </style>

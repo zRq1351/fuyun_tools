@@ -36,8 +36,8 @@ pub struct SessionHandle {
     pub device_name: String,
     stop_flag: Arc<AtomicBool>,
     child: Arc<Mutex<Option<Child>>>,
-    adb_path: PathBuf,
-    serial: String,
+    pub adb_path: PathBuf,
+    pub serial: String,
     socket_name: String,
     pub control_tx: mpsc::Sender<Vec<u8>>,
 }
@@ -365,7 +365,7 @@ fn run_video_reader(video: &mut TcpStream, hub: &Hub, stop_flag: &AtomicBool) {
                     break;
                 }
                 frame_count += 1;
-                if frame_count <= 3 || frame_count % 300 == 0 {
+                if frame_count <= 3 || frame_count.is_multiple_of(300) {
                     log::warn!(
                         "[mirror] 帧 #{}: size={} key={} config={}",
                         frame_count,

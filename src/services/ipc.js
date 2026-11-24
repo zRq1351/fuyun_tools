@@ -172,6 +172,7 @@ export const IPC_COMMANDS = {
     MIRROR_START: 'mirror_start',
     MIRROR_STOP: 'mirror_stop',
     MIRROR_STATUS: 'mirror_status',
+    MIRROR_PUSH_FILE: 'mirror_push_file',
     SAVE_SCREENSHOT_TO_PATH: 'save_screenshot_to_path',
     EXPORT_SCREENSHOT_TO_PATH: 'export_screenshot_to_path',
     COPY_SCREENSHOT_TO_CLIPBOARD: 'copy_screenshot_to_clipboard',
@@ -676,6 +677,7 @@ export const MirrorService = {
     start: () => ipcInvoke(IPC_COMMANDS.MIRROR_START),
     stop: () => ipcInvoke(IPC_COMMANDS.MIRROR_STOP),
     getStatus: () => ipcInvoke(IPC_COMMANDS.MIRROR_STATUS),
+    pushFile: (path) => ipcInvoke(IPC_COMMANDS.MIRROR_PUSH_FILE, {path}),
 };
 
 export const BackupService = {

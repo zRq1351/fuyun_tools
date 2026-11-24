@@ -68,7 +68,7 @@ pub fn resolve_adb(app: Option<&tauri::AppHandle>) -> Result<PathBuf, String> {
     Err("未找到 adb.exe（应随应用分发）".to_string())
 }
 
-fn run_adb(adb: &std::path::Path, args: &[&str], timeout: Duration) -> Result<String, String> {
+pub fn run_adb(adb: &std::path::Path, args: &[&str], timeout: Duration) -> Result<String, String> {
     let adb = adb.to_path_buf();
     let args_msg = format!("adb {}", args.join(" "));
     let args: Vec<String> = args.iter().map(|s| s.to_string()).collect();
