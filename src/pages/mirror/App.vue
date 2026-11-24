@@ -22,10 +22,6 @@
             class="status-text"
           >{{ statusText }}</span>
         </span>
-        <span
-          v-if="connected && !isFs"
-          class="diag"
-        >{{ diag.recv }} / {{ diag.decoded }}</span>
       </div>
       <div class="actions">
         <div class="seg">
@@ -156,7 +152,7 @@
 </template>
 
 <script setup>
-import { onMounted, onUnmounted, reactive, ref } from 'vue'
+import { onMounted, onUnmounted, ref } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { IPC_COMMANDS } from '../../services/ipc'   
 import { getCurrentWindow } from '@tauri-apps/api/window'
@@ -172,7 +168,6 @@ const canvasRef = ref(null)
 const connected = ref(false)
 const errorMsg = ref('')
 const statusText = ref('未连接')
-const diag = reactive({ recv: 0, decoded: 0 })
 const isFs = ref(false)
 const barShow = ref(true)
 
@@ -320,7 +315,6 @@ function annexbToAvcc(payload, stripParamSets) {
 }
 
 function feedChunk(payload, keyFrame) {
-  diag.recv++
   if (!decoder || decoder.state !== 'configured') return
   const data = annexbToAvcc(payload, keyFrame)
   if (!data.length) return
@@ -331,7 +325,6 @@ function feedChunk(payload, keyFrame) {
       timestamp: timestampUs,
       data,
     }))
-    diag.decoded++
   } catch (e) {
     console.error('[mirror] decode failed:', e)
   }
@@ -683,14 +676,6 @@ onUnmounted(() => {
 @keyframes pulse {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.45; }
-}
-
-.diag {
-  font-size: 11px;
-  color: var(--muted);
-  opacity: 0.75;
-  font-family: Consolas, monospace;
-  white-space: nowrap;
 }
 
 .actions {
