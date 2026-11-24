@@ -259,6 +259,9 @@ fn accept_with_timeout(listener: &std::net::TcpListener, timeout: Duration) -> O
         match listener.accept() {
             Ok((stream, _)) => {
                 let _ = listener.set_nonblocking(false);
+                // Windows 上 accept 出的 socket 会继承监听 socket 的非阻塞状态，
+                // 必须显式恢复阻塞，否则后续 read 会立刻返回 WSAEWOULDBLOCK
+                let _ = stream.set_nonblocking(false);
                 return Some(stream);
             }
             Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
