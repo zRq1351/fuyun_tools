@@ -1,7 +1,8 @@
 <template>
   <div
     class="mirror-page"
-    :class="theme"
+    :class="[theme, { fullscreen: isFs, 'bar-show': barShow }]"
+    @mousemove="onMouseMove"
   >
     <div
       class="toolbar"
@@ -16,85 +17,98 @@
           :class="{ connected: connected }"
         >
           <span class="dot" />
-          {{ statusText }}
+          <span
+            v-if="!connected"
+            class="status-text"
+          >{{ statusText }}</span>
         </span>
         <span
-          v-if="connected"
+          v-if="connected && !isFs"
           class="diag"
         >{{ diag.recv }} / {{ diag.decoded }}</span>
       </div>
       <div class="actions">
-        <button
-          class="btn"
-          :disabled="!connected"
-          title="返回"
-          @click="sendBack"
-        >
-          <svg viewBox="0 0 24 24"><path d="M15.5 4.5 8 12l7.5 7.5" /></svg>
-        </button>
-        <button
-          class="btn"
-          :disabled="!connected"
-          title="主页"
-          @click="sendHome"
-        >
-          <svg viewBox="0 0 24 24"><circle
-            cx="12"
-            cy="12"
-            r="7.5"
-          /></svg>
-        </button>
-        <button
-          class="btn"
-          :disabled="!connected"
-          title="最近任务"
-          @click="sendRecents"
-        >
-          <svg viewBox="0 0 24 24"><rect
-            x="5"
-            y="5"
-            width="14"
-            height="14"
-            rx="2.5"
-          /></svg>
-        </button>
-        <span class="divider" />
-        <button
-          class="btn"
-          :disabled="!connected"
-          title="旋转屏幕"
-          @click="sendRotate"
-        >
-          <svg viewBox="0 0 24 24"><path d="M4.5 9a8 8 0 0 1 14.3-2.6M19.5 15a8 8 0 0 1-14.3 2.6M18.8 3.2v3.4h-3.4M5.2 20.8v-3.4h3.4" /></svg>
-        </button>
-        <span class="divider" />
-        <button
-          class="btn"
-          title="最小化"
-          @click="minimizeWindow"
-        >
-          <svg viewBox="0 0 24 24"><path d="M6 12h12" /></svg>
-        </button>
-        <button
-          class="btn"
-          title="最大化 / 还原"
-          @click="toggleMaximize"
-        >
-          <svg viewBox="0 0 24 24"><rect
-            x="5.5"
-            y="5.5"
-            width="13"
-            height="13"
-            rx="1.5"
-          /></svg>
-        </button>
-        <button
-          class="btn close"
-          title="关闭投屏"
-          @click="closeWindow"
-        >
-          <svg viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18" /></svg>
-        </button>
+        <div class="seg">
+          <button
+            class="btn"
+            :disabled="!connected"
+            title="返回"
+            @click="sendBack"
+          >
+            <svg viewBox="0 0 24 24"><path d="M15.5 4.5 8 12l7.5 7.5" /></svg>
+          </button>
+          <button
+            class="btn"
+            :disabled="!connected"
+            title="主页"
+            @click="sendHome"
+          >
+            <svg viewBox="0 0 24 24"><circle
+              cx="12"
+              cy="12"
+              r="7.5"
+            /></svg>
+          </button>
+          <button
+            class="btn"
+            :disabled="!connected"
+            title="最近任务"
+            @click="sendRecents"
+          >
+            <svg viewBox="0 0 24 24"><rect
+              x="5"
+              y="5"
+              width="14"
+              height="14"
+              rx="2.5"
+            /></svg>
+          </button>
+          <button
+            class="btn"
+            :disabled="!connected"
+            title="旋转屏幕"
+            @click="sendRotate"
+          >
+            <svg viewBox="0 0 24 24"><path d="M4.5 9a8 8 0 0 1 14.3-2.6M19.5 15a8 8 0 0 1-14.3 2.6M18.8 3.2v3.4h-3.4M5.2 20.8v-3.4h3.4" /></svg>
+          </button>
+        </div>
+        <div class="seg win">
+          <button
+            v-if="!isFs"
+            class="btn"
+            title="最小化"
+            @click="minimizeWindow"
+          >
+            <svg viewBox="0 0 24 24"><path d="M6 12h12" /></svg>
+          </button>
+          <button
+            class="btn"
+            :title="isFs ? '退出全屏' : '铺满屏幕'"
+            @click="toggleFullscreen"
+          >
+            <svg
+              v-if="!isFs"
+              viewBox="0 0 24 24"
+            ><rect
+              x="5.5"
+              y="5.5"
+              width="13"
+              height="13"
+              rx="1.5"
+            /></svg>
+            <svg
+              v-else
+              viewBox="0 0 24 24"
+            ><path d="M9.5 3.5v4a2 2 0 0 1-2 2h-4M14.5 20.5v-4a2 2 0 0 1 2-2h4M9.5 20.5v-4a2 2 0 0 0-2-2h-4M14.5 3.5v4a2 2 0 0 0 2 2h4" /></svg>
+          </button>
+          <button
+            class="btn close"
+            title="关闭投屏"
+            @click="closeWindow"
+          >
+            <svg viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18" /></svg>
+          </button>
+        </div>
       </div>
     </div>
 
@@ -151,6 +165,7 @@ import { useTheme } from '../../composables/useTheme'
 import { initTheme } from '../../utils/themeManager'
 
 const { currentTheme: theme } = useTheme()
+let unlistenResize = null
 
 const stageRef = ref(null)
 const canvasRef = ref(null)
@@ -158,6 +173,8 @@ const connected = ref(false)
 const errorMsg = ref('')
 const statusText = ref('未连接')
 const diag = reactive({ recv: 0, decoded: 0 })
+const isFs = ref(false)
+const barShow = ref(true)
 
 // ---- 状态 ----
 let ws = null
@@ -391,15 +408,30 @@ async function minimizeWindow() {
   try { await getCurrentWindow().minimize() } catch { /* ignore */ }
 }
 
-async function toggleMaximize() {
+// 最大化键语义：在「铺满屏幕」（真全屏）与窗口化之间切换
+async function toggleFullscreen() {
   try {
     const win = getCurrentWindow()
-    if (await win.isMaximized()) {
-      await win.unmaximize()
+    if (await win.isFullscreen()) {
+      await win.setFullscreen(false)
     } else {
-      await win.maximize()
+      await win.setFullscreen(true)
     }
   } catch { /* ignore */ }
+}
+
+function onMouseMove(event) {
+  if (!isFs.value) {
+    barShow.value = true
+    return
+  }
+  barShow.value = event.clientY <= 48
+}
+
+function onKeydown(event) {
+  if (event.key === 'Escape' && isFs.value) {
+    getCurrentWindow().setFullscreen(false).catch(() => {})
+  }
 }
 
 // ---- 窗口随视频方向横竖切换 ----
@@ -494,6 +526,12 @@ function connectWebSocket(port) {
 onMounted(async () => {
   initTheme() // 同步后端主题并应用（跨窗口 storage 事件由 useTheme 监听）
   try {
+    unlistenResize = await getCurrentWindow().onResized(async () => {
+      try { isFs.value = await getCurrentWindow().isFullscreen() } catch { /* ignore */ }
+    })
+  } catch { /* ignore */ }
+  window.addEventListener('keydown', onKeydown)
+  try {
     const info = await invoke(IPC_COMMANDS.MIRROR_START)
     connectWebSocket(info.relayPort)
   } catch (e) {
@@ -505,6 +543,8 @@ onMounted(async () => {
 
 onUnmounted(() => {
   stopped = true
+  if (unlistenResize) { unlistenResize(); unlistenResize = null }
+  window.removeEventListener('keydown', onKeydown)
   if (ws) { try { ws.close() } catch { /* ignore */ } ws = null }
   if (decoder) { try { decoder.close() } catch { /* ignore */ } decoder = null }
 })
@@ -656,7 +696,42 @@ onUnmounted(() => {
 .actions {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
+}
+
+/* 分段式按钮组：手机功能键 / 窗口控制键 */
+.seg {
+  display: flex;
+  align-items: stretch;
+  border: 1px solid var(--btn-border);
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--btn-bg);
+}
+
+.seg .btn {
+  border: none;
+  border-radius: 0;
+  background: transparent;
+}
+
+.seg .btn:hover:not(:disabled) {
+  background: var(--btn-hover-bg);
+  color: var(--text);
+}
+
+.seg .btn:active:not(:disabled) {
+  transform: none;
+  background: var(--btn-hover-bg);
+}
+
+.seg .btn + .btn {
+  border-left: 1px solid var(--btn-border);
+}
+
+.seg .btn.close:hover:not(:disabled) {
+  background: var(--danger-hover-bg);
+  color: var(--danger-hover-text);
 }
 
 .btn {
@@ -699,27 +774,32 @@ onUnmounted(() => {
   cursor: default;
 }
 
-.btn.danger {
-  color: var(--danger-text);
-  border-color: var(--danger-border);
+/* 全屏（铺满屏幕）：工具栏滑出隐藏，画面去 bezel 填满 */
+.mirror-page.fullscreen .toolbar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 10;
+  transform: translateY(-110%);
+  transition: transform 0.2s ease;
 }
 
-.btn.danger:hover:not(:disabled) {
-  background: var(--danger-hover-bg);
-  color: var(--danger-hover-text);
+.mirror-page.fullscreen.bar-show .toolbar {
+  transform: none;
 }
 
-.btn.close:hover:not(:disabled) {
-  background: var(--danger-hover-bg);
-  color: var(--danger-hover-text);
-  border-color: var(--danger-border);
+.mirror-page.fullscreen .device {
+  padding: 0;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
 }
 
-.divider {
-  width: 1px;
-  height: 18px;
-  background: var(--divider);
-  margin: 0 4px;
+.mirror-page.fullscreen .screen {
+  max-width: 100vw;
+  max-height: 100vh;
+  border-radius: 0;
 }
 
 .stage {
