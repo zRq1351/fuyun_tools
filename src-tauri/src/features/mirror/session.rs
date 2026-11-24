@@ -304,11 +304,13 @@ fn read_device_meta(video: &mut TcpStream) -> Result<String, String> {
 fn run_video_reader(video: &mut TcpStream, hub: &Hub, stop_flag: &AtomicBool) {
     let mut header = [0u8; 12];
     // 1. codec id（u32）
-    if read_exact_loop(video, &mut header[0..4]).is_err() {
+    if let Err(e) = read_exact_loop(video, &mut header[0..4]) {
+        log::warn!("[mirror] 读 codec id 失败: {}", e);
         hub.send_text(r#"{"type":"stopped","reason":"stream-open"}"#.into());
         return;
     }
     let codec = &header[0..4];
+    log::warn!("[mirror] codec id: {:02x?}", codec);
     hub.send_text(
         serde_json::json!({
             "type": "codec",
@@ -318,15 +320,22 @@ fn run_video_reader(video: &mut TcpStream, hub: &Hub, stop_flag: &AtomicBool) {
     );
 
     // 2. 帧循环
+    let mut frame_count = 0u64;
     loop {
         if stop_flag.load(Ordering::SeqCst) {
             return;
         }
-        if read_exact_loop(video, &mut header).is_err() {
+        if let Err(e) = read_exact_loop(video, &mut header) {
+            log::warn!(
+                "[mirror] video reader 退出（帧头读取失败，已读 {} 帧）: {}",
+                frame_count,
+                e
+            );
             break;
         }
         match protocol::parse_video_header(&header) {
             VideoHeader::Session { width, height } => {
+                log::warn!("[mirror] session meta: {}x{}", width, height);
                 hub.send_text(
                     serde_json::json!({"type": "session", "width": width, "height": height})
                         .to_string(),
@@ -334,11 +343,33 @@ fn run_video_reader(video: &mut TcpStream, hub: &Hub, stop_flag: &AtomicBool) {
             }
             VideoHeader::Media { config, key_frame, size, .. } => {
                 if size == 0 || size > 16 * 1024 * 1024 {
+                    log::warn!(
+                        "[mirror] video reader 退出：异常帧大小 {}（第 {} 帧, key={} config={}）",
+                        size,
+                        frame_count,
+                        key_frame,
+                        config
+                    );
                     break; // 协议错位或异常帧
                 }
                 let mut payload = vec![0u8; size as usize];
-                if read_exact_loop(video, &mut payload).is_err() {
+                if let Err(e) = read_exact_loop(video, &mut payload) {
+                    log::warn!(
+                        "[mirror] video reader 退出（帧负载读取失败，已读 {} 帧）: {}",
+                        frame_count,
+                        e
+                    );
                     break;
+                }
+                frame_count += 1;
+                if frame_count <= 3 || frame_count % 300 == 0 {
+                    log::warn!(
+                        "[mirror] 帧 #{}: size={} key={} config={}",
+                        frame_count,
+                        size,
+                        key_frame,
+                        config
+                    );
                 }
                 // 信封：byte0 bit0=config bit1=keyframe
                 let mut flags = 0u8;
@@ -367,41 +398,60 @@ fn run_device_msg_reader(control: &mut TcpStream, stop_flag: &AtomicBool) {
     let mut u16_buf = [0u8; 2];
     let mut u8_buf = [0u8; 1];
     let mut i64_buf = [0u8; 8];
+    let mut msg_count = 0u64;
     while !stop_flag.load(Ordering::SeqCst) {
-        if read_exact_loop(control, &mut u8_buf).is_err() {
+        if let Err(e) = read_exact_loop(control, &mut u8_buf) {
+            log::warn!(
+                "[mirror] control reader 退出（读消息类型失败，已收 {} 条）: {}",
+                msg_count,
+                e
+            );
             return;
         }
+        msg_count += 1;
         match u8_buf[0] {
             0 => {
                 if read_exact_loop(control, &mut u32_buf).is_err() {
+                    log::warn!("[mirror] control reader: CLIPBOARD 长度读取失败");
                     return;
                 }
                 let len = u32::from_be_bytes(u32_buf) as usize;
                 let mut sink = vec![0u8; len];
                 if read_exact_loop(control, &mut sink).is_err() {
+                    log::warn!("[mirror] control reader: CLIPBOARD 数据读取失败 (len={})", len);
                     return;
                 }
-                // v1：设备剪贴板同步暂不处理
+                log::warn!("[mirror] 收到设备剪贴板消息 ({} 字节)", len);
             }
             1 => {
                 if read_exact_loop(control, &mut i64_buf).is_err() {
+                    log::warn!("[mirror] control reader: ACK 读取失败");
                     return;
                 }
             }
             2 => {
                 if read_exact_loop(control, &mut u16_buf).is_err() {
+                    log::warn!("[mirror] control reader: UHID id 读取失败");
                     return;
                 }
                 if read_exact_loop(control, &mut u16_buf).is_err() {
+                    log::warn!("[mirror] control reader: UHID len 读取失败");
                     return;
                 }
                 let len = u16::from_be_bytes(u16_buf) as usize;
                 let mut sink = vec![0u8; len];
                 if read_exact_loop(control, &mut sink).is_err() {
+                    log::warn!("[mirror] control reader: UHID 数据读取失败 (len={})", len);
                     return;
                 }
             }
-            _ => return, // 未知类型，流错位风险，直接退出
+            other => {
+                log::warn!(
+                    "[mirror] control reader: 未知消息类型 {}，流错位退出",
+                    other
+                );
+                return;
+            }
         }
     }
 }
