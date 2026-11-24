@@ -28,10 +28,10 @@ pub fn ensure_mirror_window(app: &AppHandle) -> Result<tauri::WebviewWindow, Str
     )
     .title("手机投屏")
     .visible(false)
-    .decorations(true)
+    .decorations(false) // 无边框：前端工具栏承担标题栏（拖拽/关闭）
     .resizable(true)
     .minimizable(true)
-    .maximizable(true)
+    .maximizable(false)
     .inner_size(432.0, 912.0)
     .min_inner_size(360.0, 640.0)
     .build()

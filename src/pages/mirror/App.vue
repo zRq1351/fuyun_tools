@@ -1,7 +1,16 @@
 <template>
-  <div class="mirror-page">
-    <div class="toolbar">
-      <div class="toolbar-left">
+  <div
+    class="mirror-page"
+    :class="theme"
+  >
+    <div
+      class="toolbar"
+      data-tauri-drag-region
+    >
+      <div
+        class="toolbar-left"
+        data-tauri-drag-region
+      >
         <span
           class="status"
           :class="{ connected: connected }"
@@ -58,14 +67,21 @@
         >
           <svg viewBox="0 0 24 24"><path d="M4.5 9a8 8 0 0 1 14.3-2.6M19.5 15a8 8 0 0 1-14.3 2.6M18.8 3.2v3.4h-3.4M5.2 20.8v-3.4h3.4" /></svg>
         </button>
+        <span class="divider" />
+        <button
+          class="btn"
+          title="最小化"
+          @click="minimizeWindow"
+        >
+          <svg viewBox="0 0 24 24"><path d="M6 12h12" /></svg>
+        </button>
         <button
           class="btn danger"
           :disabled="!connected"
-          title="断开投屏"
+          title="断开并关闭投屏"
           @click="disconnect"
         >
           <svg viewBox="0 0 24 24"><path d="M12 3v8M6.3 6.7a8 8 0 1 0 11.4 0" /></svg>
-          <span class="btn-text">断开</span>
         </button>
       </div>
     </div>
@@ -118,6 +134,10 @@ import { onMounted, onUnmounted, reactive, ref } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { IPC_COMMANDS } from '../../services/ipc'   
 import { getCurrentWindow } from '@tauri-apps/api/window'
+import { useTheme } from '../../composables/useTheme'
+import { initTheme } from '../../utils/themeManager'
+
+const { currentTheme: theme } = useTheme()
 
 const stageRef = ref(null)
 const canvasRef = ref(null)
@@ -353,6 +373,10 @@ async function disconnect() {
   try { await getCurrentWindow().close() } catch { /* ignore */ }
 }
 
+async function minimizeWindow() {
+  try { await getCurrentWindow().minimize() } catch { /* ignore */ }
+}
+
 // ---- WS 生命周期 ----
 function handleText(text) {
   let msg
@@ -420,6 +444,7 @@ function connectWebSocket(port) {
 }
 
 onMounted(async () => {
+  initTheme() // 同步后端主题并应用（跨窗口 storage 事件由 useTheme 监听）
   try {
     const info = await invoke(IPC_COMMANDS.MIRROR_START)
     connectWebSocket(info.relayPort)
@@ -438,13 +463,80 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
+/* ---- 主题令牌（跟随设置页 dark / light / eye-care）---- */
+.mirror-page.dark {
+  --bg: #0b0e12;
+  --bg-hi: #1a222c;
+  --panel: rgba(20, 24, 30, 0.85);
+  --panel-border: #20262e;
+  --text: #dfe5ec;
+  --muted: #8a97a5;
+  --btn-bg: #1a2027;
+  --btn-border: #262f39;
+  --btn-hover-bg: #242d37;
+  --btn-hover-border: #3a4552;
+  --btn-text: #b7c2cd;
+  --accent: #4cd47c;
+  --danger-text: #ff8f8f;
+  --danger-border: #4a2c2c;
+  --danger-hover-bg: #33201f;
+  --danger-hover-text: #ffb3b3;
+  --divider: #2a323c;
+  --pill-bg: #171c22;
+  --pill-border: #242b33;
+}
+
+.mirror-page.light {
+  --bg: #eef1f5;
+  --bg-hi: #f8fafc;
+  --panel: rgba(255, 255, 255, 0.92);
+  --panel-border: #d9dfe6;
+  --text: #1f2730;
+  --muted: #6a7683;
+  --btn-bg: #f6f8fa;
+  --btn-border: #d9dfe6;
+  --btn-hover-bg: #e7ecf2;
+  --btn-hover-border: #b9c3ce;
+  --btn-text: #3c4653;
+  --accent: #21a35c;
+  --danger-text: #d34040;
+  --danger-border: #ecc9c9;
+  --danger-hover-bg: #f6dfdf;
+  --danger-hover-text: #b02c2c;
+  --divider: #d9dfe6;
+  --pill-bg: #ffffff;
+  --pill-border: #e3e8ee;
+}
+
+.mirror-page.eye-care {
+  --bg: #c9dcc2;
+  --bg-hi: #dcead6;
+  --panel: rgba(243, 248, 238, 0.9);
+  --panel-border: #adc2a5;
+  --text: #2f3a2d;
+  --muted: #62745c;
+  --btn-bg: #d8e6d1;
+  --btn-border: #b7c9af;
+  --btn-hover-bg: #c9dcc1;
+  --btn-hover-border: #a3b89b;
+  --btn-text: #3a4a36;
+  --accent: #2f9e5e;
+  --danger-text: #a94434;
+  --danger-border: #d4b3a8;
+  --danger-hover-bg: #e3c8bd;
+  --danger-hover-text: #8f3322;
+  --divider: #b7c9af;
+  --pill-bg: #e9f0e4;
+  --pill-border: #b7c9af;
+}
+
 .mirror-page {
   width: 100vw;
   height: 100vh;
   display: flex;
   flex-direction: column;
-  background: radial-gradient(ellipse at 50% -20%, #1a222c 0%, #0b0e12 60%);
-  color: #dfe5ec;
+  background: radial-gradient(ellipse at 50% -20%, var(--bg-hi) 0%, var(--bg) 60%);
+  color: var(--text);
   font-family: 'Segoe UI', 'Microsoft YaHei', sans-serif;
   user-select: none;
 }
@@ -454,10 +546,9 @@ onUnmounted(() => {
   align-items: center;
   justify-content: space-between;
   padding: 8px 14px;
-  background: rgba(20, 24, 30, 0.85);
-  border-bottom: 1px solid #20262e;
+  background: var(--panel);
+  border-bottom: 1px solid var(--panel-border);
   flex: 0 0 auto;
-  backdrop-filter: blur(6px);
 }
 
 .toolbar-left {
@@ -469,14 +560,14 @@ onUnmounted(() => {
 
 .status {
   font-size: 13px;
-  color: #8a97a5;
+  color: var(--muted);
   display: inline-flex;
   align-items: center;
   gap: 8px;
   padding: 4px 12px;
   border-radius: 999px;
-  background: #171c22;
-  border: 1px solid #242b33;
+  background: var(--pill-bg);
+  border: 1px solid var(--pill-border);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -486,18 +577,18 @@ onUnmounted(() => {
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: #5b6773;
+  background: var(--muted);
   flex: 0 0 auto;
 }
 
 .status.connected {
-  color: #dfe5ec;
-  border-color: #2a4a37;
+  color: var(--text);
+  border-color: var(--accent);
 }
 
 .status.connected .dot {
-  background: #4cd47c;
-  box-shadow: 0 0 6px #4cd47c;
+  background: var(--accent);
+  box-shadow: 0 0 6px var(--accent);
   animation: pulse 2s ease-in-out infinite;
 }
 
@@ -508,7 +599,8 @@ onUnmounted(() => {
 
 .diag {
   font-size: 11px;
-  color: #5b6773;
+  color: var(--muted);
+  opacity: 0.75;
   font-family: Consolas, monospace;
   white-space: nowrap;
 }
@@ -526,9 +618,9 @@ onUnmounted(() => {
   gap: 6px;
   width: 34px;
   height: 30px;
-  background: #1a2027;
-  color: #b7c2cd;
-  border: 1px solid #262f39;
+  background: var(--btn-bg);
+  color: var(--btn-text);
+  border: 1px solid var(--btn-border);
   border-radius: 8px;
   cursor: pointer;
   transition: background 0.15s, color 0.15s, border-color 0.15s;
@@ -545,13 +637,12 @@ onUnmounted(() => {
 }
 
 .btn:hover:not(:disabled) {
-  background: #242d37;
-  color: #ffffff;
-  border-color: #3a4552;
+  background: var(--btn-hover-bg);
+  color: var(--text);
+  border-color: var(--btn-hover-border);
 }
 
 .btn:active:not(:disabled) {
-  background: #2c3742;
   transform: translateY(1px);
 }
 
@@ -561,26 +652,19 @@ onUnmounted(() => {
 }
 
 .btn.danger {
-  width: auto;
-  padding: 0 12px;
-  color: #ff8f8f;
-  border-color: #4a2c2c;
+  color: var(--danger-text);
+  border-color: var(--danger-border);
 }
 
 .btn.danger:hover:not(:disabled) {
-  background: #33201f;
-  color: #ffb3b3;
-  border-color: #6e3a3a;
-}
-
-.btn-text {
-  font-size: 13px;
+  background: var(--danger-hover-bg);
+  color: var(--danger-hover-text);
 }
 
 .divider {
   width: 1px;
   height: 18px;
-  background: #2a323c;
+  background: var(--divider);
   margin: 0 4px;
 }
 
@@ -598,7 +682,7 @@ onUnmounted(() => {
   padding: 8px;
   border-radius: 22px;
   background: #05070a;
-  border: 1px solid #232a33;
+  border: 1px solid var(--panel-border);
   box-shadow:
     0 0 0 1px rgba(255, 255, 255, 0.04) inset,
     0 18px 50px rgba(0, 0, 0, 0.55),
@@ -627,7 +711,7 @@ onUnmounted(() => {
   align-items: center;
   justify-content: center;
   gap: 14px;
-  color: #67737f;
+  color: var(--muted);
   font-size: 14px;
   padding: 0 24px;
   text-align: center;
@@ -638,8 +722,9 @@ onUnmounted(() => {
   width: 44px;
   height: 44px;
   fill: none;
-  stroke: #39434e;
+  stroke: var(--muted);
   stroke-width: 1.6;
   stroke-linecap: round;
+  opacity: 0.6;
 }
 </style>
