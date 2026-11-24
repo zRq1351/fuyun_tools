@@ -497,12 +497,18 @@ function onPointerDown(event) {
 function onPointerMove(event) {
   if (!connected.value || !pointerDown || !videoW) return
   const { x, y } = videoPoint(event)
-  // 拖出检测：按住移动超过 10px → 取消手机侧触摸，改为 OS 级拖出
+  // 拖出检测：按住状态下指针离开窗口边界（带容差）→ OS 级拖出
+  // 窗口内的移动全部保持为手机触摸/滑动，互不冲突
   if (!dragOutActive && downClient) {
-    const dx = event.clientX - downClient.cx
-    const dy = event.clientY - downClient.cy
-    if (dx * dx + dy * dy > 100) {
+    const M = 4
+    if (
+      event.clientX < -M ||
+      event.clientY < -M ||
+      event.clientX > window.innerWidth + M ||
+      event.clientY > window.innerHeight + M
+    ) {
       dragOutActive = true
+      // 先结束手机侧触摸，避免手机上残留拖动手势
       sendControl({ kind: 'touch', action: 1, x, y, w: videoW, h: videoH, pressure: 1.0 })
       startDragOut()
       return
