@@ -109,6 +109,22 @@ pub fn run_adb(adb: &std::path::Path, args: &[&str], timeout: Duration) -> Resul
     Ok(String::from_utf8_lossy(&output.stdout).to_string())
 }
 
+/// 读取设备硬件序列号（ro.serialno）。同一台手机无线连接返回的值与 USB 序列号一致，
+/// 可用于识别「USB + 无线双连接」实为同一台设备。
+pub fn device_serialno(adb: &std::path::Path, serial: &str) -> Result<String, String> {
+    let out = run_adb(
+        adb,
+        &["-s", serial, "shell", "getprop", "ro.serialno"],
+        Duration::from_secs(5),
+    )?;
+    let s = out.trim().to_string();
+    if s.is_empty() {
+        Err("读取 ro.serialno 为空".into())
+    } else {
+        Ok(s)
+    }
+}
+
 /// 列出处于 device 状态的序列号。
 pub fn list_device_serials(adb: &std::path::Path) -> Result<Vec<String>, String> {
     let out = run_adb(adb, &["devices"], Duration::from_secs(5))?;
@@ -212,14 +228,21 @@ pub fn bind_local_listener() -> Result<(TcpListener, u16), String> {
 
 /// 切换设备到 TCP/IP 调试模式（默认端口 5555）。要求 USB 已连接。
 pub fn enable_tcpip(adb: &std::path::Path, serial: &str) -> Result<(), String> {
-    run_adb(adb, &["-s", serial, "tcpip", "5555"], Duration::from_secs(10)).map(|_| ())
+    run_adb(
+        adb,
+        &["-s", serial, "tcpip", "5555"],
+        Duration::from_secs(10),
+    )
+    .map(|_| ())
 }
 
 /// 读取设备 wlan0 的 IPv4 地址。
 pub fn get_wlan_ip(adb: &std::path::Path, serial: &str) -> Result<String, String> {
     let out = run_adb(
         adb,
-        &["-s", serial, "shell", "ip", "-f", "inet", "-o", "addr", "show", "wlan0"],
+        &[
+            "-s", serial, "shell", "ip", "-f", "inet", "-o", "addr", "show", "wlan0",
+        ],
         Duration::from_secs(10),
     )?;
     // 行如: wlan0  inet 192.168.0.104/24 brd ... scope global ...

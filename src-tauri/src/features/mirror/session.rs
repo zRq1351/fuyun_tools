@@ -92,16 +92,7 @@ pub fn start(
                 serials.join(", ")
             ));
         }
-        None => match serials.len() {
-            1 => serials[0].clone(),
-            _ => {
-                log::error!("[mirror] 检测到 {} 台设备，暂不支持自动选择", serials.len());
-                return Err(format!(
-                    "检测到多台设备（{} 台），请在连接时指定",
-                    serials.len()
-                ));
-            }
-        },
+        None => pick_default_serial(&adb_path, &serials)?,
     };
 
     let scid: u32 = rand_u31();
@@ -261,6 +252,62 @@ pub fn start(
             Err(e)
         }
     }
+}
+
+/// 未指定设备时的自动选择：
+/// 1. 同一台手机的 USB + 无线双连接（ro.serialno 相同）视为一台，优先用 USB；
+/// 2. 去重后仅剩一台 → 直接使用；
+/// 3. 仍是多台 → 若恰好只有一台 USB，则选它；否则报错并列出设备。
+fn pick_default_serial(adb_path: &std::path::Path, serials: &[String]) -> Result<String, String> {
+    // 无线连接通过 getprop 读取硬件序列号作为物理标识；USB 序列号本身就是标识
+    let mut entries: Vec<(String, String)> = Vec::with_capacity(serials.len());
+    for s in serials {
+        let id = if s.contains(':') {
+            match adb::device_serialno(adb_path, s) {
+                Ok(id) => id,
+                Err(e) => {
+                    log::warn!(
+                        "[mirror] 读取 {} 物理序列号失败（{}），按独立设备处理",
+                        s,
+                        e
+                    );
+                    s.clone()
+                }
+            }
+        } else {
+            s.clone()
+        };
+        entries.push((s.clone(), id));
+    }
+    let chosen = dedupe_prefer_usb(entries);
+    match chosen.len() {
+        0 => Err("未检测到可用设备".into()),
+        1 => Ok(chosen[0].clone()),
+        n => {
+            log::error!("[mirror] 去重后仍有 {} 台不同设备: {:?}", n, chosen);
+            Err(format!(
+                "检测到 {} 台不同的设备（{}），请只连接一台，或在设置页历史设备中指定要投屏的手机",
+                n,
+                chosen.join("、")
+            ))
+        }
+    }
+}
+
+/// 纯逻辑：按物理标识去重，同一标识优先保留 USB 连接（无线 serial 含 `:`）。
+fn dedupe_prefer_usb(entries: Vec<(String, String)>) -> Vec<String> {
+    // USB 在前（false < true），保证同一物理设备去重时保留 USB 连接；
+    // sort_by_key 稳定，不影响不同设备间的原始顺序
+    let mut sorted = entries;
+    sorted.sort_by_key(|(s, _)| s.contains(':'));
+    let mut seen = std::collections::HashSet::new();
+    let mut chosen = Vec::new();
+    for (s, id) in sorted {
+        if seen.insert(id) {
+            chosen.push(s);
+        }
+    }
+    chosen
 }
 
 fn rand_u31() -> u32 {
@@ -503,5 +550,55 @@ fn run_device_msg_reader(control: &mut TcpStream, stop_flag: &AtomicBool, hub: &
     // 非主动停止时退出 = 控制链路异常断开，广播给 viewer 触发自动恢复
     if abnormal && !stop_flag.load(Ordering::SeqCst) {
         hub.send_text(r#"{"type":"stopped","reason":"control-reader"}"#.into());
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::dedupe_prefer_usb;
+
+    #[test]
+    fn same_phone_usb_and_wireless_dedup_to_usb() {
+        // 同一台手机：USB 序列号 ABC123，无线 ro.serialno 也返回 ABC123
+        let entries = vec![
+            ("ABC123".to_string(), "ABC123".to_string()),
+            ("192.168.0.5:5555".to_string(), "ABC123".to_string()),
+        ];
+        assert_eq!(dedupe_prefer_usb(entries), vec!["ABC123"]);
+    }
+
+    #[test]
+    fn wireless_first_still_keeps_usb() {
+        // adb devices 中无线条目排在前面时，同样应保留 USB
+        let entries = vec![
+            ("192.168.0.5:5555".to_string(), "ABC123".to_string()),
+            ("ABC123".to_string(), "ABC123".to_string()),
+        ];
+        assert_eq!(dedupe_prefer_usb(entries), vec!["ABC123"]);
+    }
+
+    #[test]
+    fn distinct_phones_all_kept() {
+        let entries = vec![
+            ("ABC123".to_string(), "ABC123".to_string()),
+            ("DEF456".to_string(), "DEF456".to_string()),
+        ];
+        assert_eq!(dedupe_prefer_usb(entries), vec!["ABC123", "DEF456"]);
+    }
+
+    #[test]
+    fn wireless_getprop_failure_treated_as_independent() {
+        // getprop 失败时以 serial 兜底为标识，不会误并
+        let entries = vec![
+            ("ABC123".to_string(), "ABC123".to_string()),
+            (
+                "192.168.0.5:5555".to_string(),
+                "192.168.0.5:5555".to_string(),
+            ),
+        ];
+        assert_eq!(
+            dedupe_prefer_usb(entries),
+            vec!["ABC123", "192.168.0.5:5555"]
+        );
     }
 }
