@@ -740,6 +740,8 @@ pub fn run() {
             crate::features::mirror::commands::mirror_pull_files,
             crate::features::mirror::commands::mirror_enable_wireless,
             crate::features::mirror::commands::mirror_connect_wireless,
+            crate::features::mirror::commands::mirror_device_history,
+            crate::features::mirror::commands::mirror_reconnect_device,
             resize_recording_toolbar,
             check_recording_ffmpeg,
             download_recording_ffmpeg,

@@ -178,6 +178,8 @@ export const IPC_COMMANDS = {
     MIRROR_PULL_FILES: 'mirror_pull_files',
     MIRROR_ENABLE_WIRELESS: 'mirror_enable_wireless',
     MIRROR_CONNECT_WIRELESS: 'mirror_connect_wireless',
+    MIRROR_DEVICE_HISTORY: 'mirror_device_history',
+    MIRROR_RECONNECT_DEVICE: 'mirror_reconnect_device',
 
     // 剪贴板插件
     CLIPBOARD_READ_TEXT: 'plugin:clipboard-manager|read_text',
@@ -688,6 +690,8 @@ export const MirrorService = {
     pushFile: (path) => ipcInvoke(IPC_COMMANDS.MIRROR_PUSH_FILE, {path}),
     enableWireless: () => ipcInvoke(IPC_COMMANDS.MIRROR_ENABLE_WIRELESS, {}),
     connectWireless: (opts) => ipcInvoke(IPC_COMMANDS.MIRROR_CONNECT_WIRELESS, opts || {}),
+    deviceHistory: () => ipcInvoke(IPC_COMMANDS.MIRROR_DEVICE_HISTORY, {}),
+    reconnectDevice: (serial) => ipcInvoke(IPC_COMMANDS.MIRROR_RECONNECT_DEVICE, {serial}),
 };
 
 export const BackupService = {

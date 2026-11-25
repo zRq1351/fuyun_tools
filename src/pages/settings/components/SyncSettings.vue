@@ -131,6 +131,34 @@
       >
         输入 IP 连接
       </el-button>
+
+      <!-- 历史设备：多台手机快速切换 -->
+      <template v-if="deviceHistory.length">
+        <div class="history-title">
+          历史设备
+        </div>
+        <div
+          v-for="d in deviceHistory"
+          :key="d.serial"
+          class="history-device"
+        >
+          <span class="hd-name">{{ d.name }}</span>
+          <span class="hd-serial">{{ d.serial }}</span>
+          <span
+            v-if="d.online"
+            class="hd-online"
+          >在线</span>
+          <el-button
+            size="small"
+            type="primary"
+            plain
+            :loading="reconnecting === d.serial"
+            @click="onReconnectDevice(d)"
+          >
+            连接并投屏
+          </el-button>
+        </div>
+      </template>
     </div>
   </div>
 </template>
@@ -146,12 +174,37 @@ const {t} = useI18n()
 const mirrorStarting = ref(false)
 const wirelessStarting = ref(false)
 const wirelessConnecting = ref(false)
+const deviceHistory = ref([])
+const reconnecting = ref('')
+
+// 拉取历史设备（含在线标记）
+async function refreshDeviceHistory() {
+  try {
+    const r = await MirrorService.deviceHistory()
+    deviceHistory.value = r.devices || []
+  } catch { /* 忽略：历史不可用不影响主流程 */ }
+}
+
+// 历史设备一键重连：无线先 adb connect（幂等），再开启投屏
+async function onReconnectDevice(d) {
+  reconnecting.value = d.serial
+  try {
+    await MirrorService.reconnectDevice(d.serial)
+    await startMirrorWithSerial(d.serial)
+    refreshDeviceHistory()
+  } catch (e) {
+    ElMessage.error({message: parseErrorMessage(e) || String(e), duration: 6000})
+  } finally {
+    reconnecting.value = ''
+  }
+}
 
 async function startMirrorWithSerial(serial) {
   mirrorStarting.value = true
   try {
     await MirrorService.start(serial || undefined)
     ElMessage.success('投屏已开启')
+    refreshDeviceHistory()
   } catch (e) {
     ElMessage.error({message: String(e), duration: 5000})
   } finally {
@@ -327,6 +380,7 @@ async function onUnpair() {
 
 onMounted(async () => {
     await refreshStatus()
+    refreshDeviceHistory()
     // 记住用户选择：开启过同步则随设置页自动恢复
     if (localStorage.getItem('fuyun-sync-enabled') === '1' && !status.running) {
         await onToggle(true)
@@ -448,5 +502,48 @@ onUnmounted(() => {
   font-size: 12px;
   color: var(--el-text-color-secondary);
   line-height: 1.6;
+}
+
+/* 历史设备列表 */
+.history-title {
+  margin: 14px 0 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--el-text-color-secondary);
+}
+
+.history-device {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  margin-bottom: 6px;
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 8px;
+  background: var(--fy-bg-card, transparent);
+}
+
+.history-device .hd-name {
+  font-weight: 600;
+  color: var(--el-text-color-primary);
+}
+
+.history-device .hd-serial {
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+  font-family: monospace;
+}
+
+.history-device .hd-online {
+  font-size: 11px;
+  color: var(--el-color-success);
+  border: 1px solid var(--el-color-success);
+  border-radius: 10px;
+  padding: 0 8px;
+  line-height: 18px;
+}
+
+.history-device .el-button {
+  margin-left: auto;
 }
 </style>

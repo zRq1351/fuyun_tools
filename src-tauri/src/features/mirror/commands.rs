@@ -107,6 +107,16 @@ pub async fn mirror_start(
     *state().hub.lock().unwrap() = Some(hub);
     *state().session.lock().unwrap() = Some(handle);
 
+    // 记入设备历史（支持多台手机快速切换）
+    let app_for_history = app.clone();
+    let name_for_history = device_name.clone();
+    let serial_for_history = session_serial.clone();
+    let _ = tauri::async_runtime::spawn_blocking(move || {
+        if let Err(e) = record_device_history(&app_for_history, &name_for_history, &serial_for_history) {
+            log::warn!("[mirror] 设备历史记录失败: {}", e);
+        }
+    });
+
     super::window::show_mirror_window(&app)?;
     log::info!(
         "[mirror] 会话已建立: 设备={} 序列={} 中继端口={} 窗口已打开",
@@ -121,6 +131,120 @@ pub async fn mirror_start(
         "serial": session_serial,
         "reused": false,
     }))
+}
+
+// ---------- 设备历史（多台手机快速切换） ----------
+
+#[derive(serde::Serialize, serde::Deserialize)]
+struct HistoryDevice {
+    serial: String,
+    name: String,
+    last_used_ms: u64,
+}
+
+fn history_file_path(app: &AppHandle) -> Result<std::path::PathBuf, String> {
+    let dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("获取数据目录失败: {}", e))?;
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    Ok(dir.join("mirror_device_history.json"))
+}
+
+fn load_history(app: &AppHandle) -> Vec<HistoryDevice> {
+    let Ok(path) = history_file_path(app) else { return Vec::new() };
+    let Ok(text) = std::fs::read_to_string(&path) else { return Vec::new() };
+    serde_json::from_str(&text).unwrap_or_default()
+}
+
+fn save_history(app: &AppHandle, devices: &[HistoryDevice]) -> Result<(), String> {
+    let path = history_file_path(app)?;
+    let json = serde_json::to_string_pretty(devices).map_err(|e| e.to_string())?;
+    std::fs::write(&path, json).map_err(|e| e.to_string())
+}
+
+fn record_device_history(app: &AppHandle, name: &str, serial: &str) -> Result<(), String> {
+    let now_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64;
+    let mut devices = load_history(app);
+    if let Some(d) = devices.iter_mut().find(|d| d.serial == serial) {
+        d.name = name.to_string();
+        d.last_used_ms = now_ms;
+    } else {
+        devices.push(HistoryDevice {
+            serial: serial.to_string(),
+            name: name.to_string(),
+            last_used_ms: now_ms,
+        });
+    }
+    devices.sort_by(|a, b| b.last_used_ms.cmp(&a.last_used_ms));
+    save_history(app, &devices)
+}
+
+/// 设备历史列表（含当前在线标记），供前端设备选择 UI。
+#[tauri::command]
+pub async fn mirror_device_history(app: AppHandle) -> Result<serde_json::Value, String> {
+    let adb_path = adb::resolve_adb(Some(&app))?;
+    let app2 = app.clone();
+    let (history, online) = tauri::async_runtime::spawn_blocking(move || -> (Vec<HistoryDevice>, Vec<String>) {
+        let h = load_history(&app2);
+        let online = adb::list_device_serials(&adb_path).unwrap_or_default();
+        (h, online)
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+    let items: Vec<serde_json::Value> = history
+        .into_iter()
+        .map(|d| {
+            serde_json::json!({
+                "serial": d.serial,
+                "name": d.name,
+                "lastUsedMs": d.last_used_ms,
+                "wireless": d.serial.contains(':'),
+                "online": online.iter().any(|s| s == &d.serial),
+            })
+        })
+        .collect();
+    Ok(serde_json::json!({ "devices": items }))
+}
+
+/// 从历史 reconnect 指定设备：无线 serial 先 adb connect（幂等），USB 设备要求在线。
+/// 成功后返回 serial 供前端调用 mirror_start(serial)。
+#[tauri::command]
+pub async fn mirror_reconnect_device(
+    app: AppHandle,
+    serial: String,
+) -> Result<serde_json::Value, String> {
+    let adb_path = adb::resolve_adb(Some(&app))?;
+    let wireless = serial.contains(':');
+    let adb = adb_path.clone();
+    let s = serial.clone();
+    let out = tauri::async_runtime::spawn_blocking(move || -> Result<String, String> {
+        if wireless {
+            let r = adb::connect_wireless(&adb, &s)?;
+            if r.contains("connected to") || r.contains("already connected") {
+                Ok(r)
+            } else {
+                Err(format!(
+                    "无法连接 {}（手机可能已重启或 IP 已变化：请重新插 USB 一键切换，或输入新 IP）",
+                    s
+                ))
+            }
+        } else {
+            let online = adb::list_device_serials(&adb)?;
+            if online.iter().any(|x| x == &s) {
+                Ok("usb online".into())
+            } else {
+                Err("该手机未通过 USB 连接".into())
+            }
+        }
+    })
+    .await
+    .map_err(|e| e.to_string())??;
+    log::info!("[mirror] 历史设备重连: {} -> {}", serial, out.trim());
+    Ok(serde_json::json!({ "serial": serial }))
 }
 
 /// USB 一键切换无线投屏：把当前 USB 连接的手机切到 TCP/IP 调试（5555），
