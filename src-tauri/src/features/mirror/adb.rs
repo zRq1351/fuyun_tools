@@ -290,3 +290,131 @@ pub fn connect_wireless(adb: &std::path::Path, address: &str) -> Result<String, 
 pub fn pair_wireless(adb: &std::path::Path, address: &str, code: &str) -> Result<String, String> {
     run_adb(adb, &["pair", address, code], Duration::from_secs(15))
 }
+
+/// 解析 dumpsys display 输出中的显示器 id 集合。
+/// 兼容 `mDisplayId=N` 与 `Display N:` 两种行格式。
+pub fn parse_display_ids(out: &str) -> std::collections::HashSet<u32> {
+    let mut ids = std::collections::HashSet::new();
+    for line in out.lines() {
+        for marker in ["mDisplayId=", "Display "] {
+            if let Some(idx) = line.find(marker) {
+                let rest = &line[idx + marker.len()..];
+                let num: String = rest.chars().take_while(|c| c.is_ascii_digit()).collect();
+                if let Ok(v) = num.parse::<u32>() {
+                    ids.insert(v);
+                }
+            }
+        }
+    }
+    ids
+}
+
+/// 列出设备当前的显示器 id（虚拟显示器定位用）。
+pub fn list_display_ids(
+    adb: &std::path::Path,
+    serial: &str,
+) -> Result<std::collections::HashSet<u32>, String> {
+    let out = run_adb(
+        adb,
+        &["-s", serial, "shell", "dumpsys", "display"],
+        Duration::from_secs(10),
+    )?;
+    Ok(parse_display_ids(&out))
+}
+
+/// 解析应用的可启动 Activity（`cmd package resolve-activity --brief` 输出的最后一个 pkg/activity 行）。
+pub fn resolve_launch_activity(
+    adb: &std::path::Path,
+    serial: &str,
+    package: &str,
+) -> Result<String, String> {
+    let out = run_adb(
+        adb,
+        &[
+            "-s",
+            serial,
+            "shell",
+            "cmd",
+            "package",
+            "resolve-activity",
+            "--brief",
+            "-c",
+            "android.intent.category.LAUNCHER",
+            package,
+        ],
+        Duration::from_secs(10),
+    )?;
+    out.lines()
+        .rev()
+        .map(str::trim)
+        .find(|l| l.contains('/') && l.contains('.'))
+        .map(str::to_string)
+        .ok_or_else(|| {
+            format!(
+                "未找到 {} 的可启动 Activity（包名无效或应用无启动入口）",
+                package
+            )
+        })
+}
+
+/// 在指定显示器上启动 Activity（应用投屏核心：虚拟显示器 + am start --display）。
+pub fn am_start_on_display(
+    adb: &std::path::Path,
+    serial: &str,
+    display_id: u32,
+    component: &str,
+) -> Result<String, String> {
+    run_adb(
+        adb,
+        &[
+            "-s",
+            serial,
+            "shell",
+            "am",
+            "start",
+            "--display",
+            &display_id.to_string(),
+            "-n",
+            component,
+        ],
+        Duration::from_secs(15),
+    )
+}
+
+/// 列出第三方应用包名（`pm list packages -3`，去掉 `package:` 前缀并排序）。
+pub fn list_third_party_packages(
+    adb: &std::path::Path,
+    serial: &str,
+) -> Result<Vec<String>, String> {
+    let out = run_adb(
+        adb,
+        &["-s", serial, "shell", "pm", "list", "packages", "-3"],
+        Duration::from_secs(15),
+    )?;
+    let mut pkgs: Vec<String> = out
+        .lines()
+        .map(str::trim)
+        .filter_map(|l| l.strip_prefix("package:"))
+        .map(str::to_string)
+        .collect();
+    pkgs.sort();
+    Ok(pkgs)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_display_ids;
+
+    #[test]
+    fn parse_dumpsys_display_ids() {
+        let out = "Displays: size=2\n  Display 0:\n    mDisplayId=0\n  Display 2:\n    mDisplayId=2\nDisplay Devices: size=1\n";
+        let ids = parse_display_ids(out);
+        assert!(ids.contains(&0) && ids.contains(&2));
+        assert_eq!(ids.len(), 2);
+    }
+
+    #[test]
+    fn parse_empty_output() {
+        assert!(parse_display_ids("").is_empty());
+    }
+}

@@ -175,6 +175,7 @@ export const IPC_COMMANDS = {
     MIRROR_PUSH_FILE: 'mirror_push_file',
     MIRROR_EXPORT_RECENT: 'mirror_export_recent',
     MIRROR_LIST_PHONE_FILES: 'mirror_list_phone_files',
+    MIRROR_LIST_APPS: 'mirror_list_apps',
     MIRROR_PULL_FILES: 'mirror_pull_files',
     MIRROR_ENABLE_WIRELESS: 'mirror_enable_wireless',
     MIRROR_CONNECT_WIRELESS: 'mirror_connect_wireless',
@@ -684,7 +685,12 @@ export const SyncService = {
 }
 
 export const MirrorService = {
-    start: (serial) => ipcInvoke(IPC_COMMANDS.MIRROR_START, serial ? {serial} : {}),
+    start: (serial, appPackage) => {
+        const args = {}
+        if (serial) args.serial = serial
+        if (appPackage) args.appPackage = appPackage
+        return ipcInvoke(IPC_COMMANDS.MIRROR_START, args)
+    },
     stop: () => ipcInvoke(IPC_COMMANDS.MIRROR_STOP),
     getStatus: () => ipcInvoke(IPC_COMMANDS.MIRROR_STATUS),
     pushFile: (path) => ipcInvoke(IPC_COMMANDS.MIRROR_PUSH_FILE, {path}),
@@ -692,6 +698,7 @@ export const MirrorService = {
     connectWireless: (opts) => ipcInvoke(IPC_COMMANDS.MIRROR_CONNECT_WIRELESS, opts || {}),
     deviceHistory: () => ipcInvoke(IPC_COMMANDS.MIRROR_DEVICE_HISTORY, {}),
     reconnectDevice: (serial) => ipcInvoke(IPC_COMMANDS.MIRROR_RECONNECT_DEVICE, {serial}),
+    listApps: () => ipcInvoke(IPC_COMMANDS.MIRROR_LIST_APPS, {}),
 };
 
 export const BackupService = {

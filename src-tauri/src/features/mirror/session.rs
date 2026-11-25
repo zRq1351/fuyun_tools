@@ -70,12 +70,15 @@ pub struct StartOutcome {
 
 /// 启动一次完整会话。阻塞调用（含 adb 命令与 socket 握手），应在线程池中执行。
 /// `preferred_serial`：优先使用的设备序列号（无线投屏时为 `ip:port`）。
+/// `app_package`：提供时启用应用投屏——server 创建虚拟显示器（new_display），
+/// 会话建立后把该应用启动到虚拟屏上，手机物理屏幕可自由使用。
 pub fn start(
     app: &tauri::AppHandle,
     hub: Hub,
     adb_path: std::path::PathBuf,
     jar_path: std::path::PathBuf,
     preferred_serial: Option<String>,
+    app_package: Option<String>,
 ) -> Result<SessionHandle, String> {
     let serials = adb::list_device_serials(&adb_path)?;
     log::info!("[mirror] 发现设备: {:?}", serials);
@@ -113,9 +116,17 @@ pub fn start(
         dir.join("scrcpy_server.log")
     });
 
+    // 应用投屏：记录现有显示器 id，会话建立后用差集定位新建的虚拟显示器
+    let before_ids = if app_package.is_some() {
+        adb::list_display_ids(&adb_path, &serial)
+            .map_err(|e| format!("查询显示器信息失败（应用投屏需要 Android 10+）: {}", e))?
+    } else {
+        Default::default()
+    };
+
     // 注意：codec option 值按整数解析（不要带 "s" 后缀）。
     // i-frame-interval=2：viewer 晚接入错过首个关键帧时最多 2 秒即可等到下一个。
-    let options = format!(
+    let mut options = format!(
         "scid={:08x} log_level=info video=true audio=false control=true \
          max_size={} video_bit_rate={} max_fps={} \
          video_codec_options=i-frame-interval=2 \
@@ -123,6 +134,10 @@ pub fn start(
          send_stream_meta=true tunnel_forward=false",
         scid, MAX_SIZE, BIT_RATE, MAX_FPS
     );
+    if app_package.is_some() {
+        // 虚拟显示器：尺寸默认同主屏（server 端 new_display=true 语义）
+        options.push_str(" new_display=true");
+    }
     let child = adb::start_server(&adb_path, &serial, &options, server_log.as_ref())?;
     let child = Arc::new(Mutex::new(Some(child)));
 
@@ -233,6 +248,24 @@ pub fn start(
                 handle.device_name,
                 local_port
             );
+            // 应用投屏：定位新建的虚拟显示器并在其上启动目标应用
+            // （adb_path/serial 已被 build 闭包移走，使用 build 前创建的清理副本）
+            if let Some(pkg) = &app_package {
+                match launch_app_on_new_display(&cleanup_adb, &cleanup_serial, pkg, &before_ids) {
+                    Ok(display_id) => {
+                        log::info!(
+                            "[mirror] 应用已在虚拟显示器 {} 启动: {}（手机物理屏幕可自由使用）",
+                            display_id,
+                            pkg
+                        );
+                    }
+                    Err(e) => {
+                        log::error!("[mirror] 应用投屏启动失败: {}", e);
+                        handle.stop();
+                        return Err(e);
+                    }
+                }
+            }
             Ok(handle)
         }
         Err(e) => {
@@ -252,6 +285,39 @@ pub fn start(
             Err(e)
         }
     }
+}
+
+/// 应用投屏：定位新建的虚拟显示器（id 差集，排除物理屏 0）并在其上启动应用。
+fn launch_app_on_new_display(
+    adb_path: &std::path::Path,
+    serial: &str,
+    package: &str,
+    before: &std::collections::HashSet<u32>,
+) -> Result<u32, String> {
+    let component = adb::resolve_launch_activity(adb_path, serial, package)?;
+    log::info!("[mirror] 应用启动入口: {}", component);
+    // server 建虚拟显示器可能有延迟，轮询最多 5 秒
+    let mut new_id = None;
+    for _ in 0..10 {
+        let after = adb::list_display_ids(adb_path, serial)?;
+        let diff: Vec<u32> = after
+            .difference(before)
+            .copied()
+            .filter(|&id| id != 0)
+            .collect();
+        if let Some(&id) = diff.first() {
+            new_id = Some(id);
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(500));
+    }
+    let display_id = new_id
+        .ok_or_else(|| "未能定位新创建的虚拟显示器（应用投屏需要 Android 10+）".to_string())?;
+    let out = adb::am_start_on_display(adb_path, serial, display_id, &component)?;
+    if out.contains("Error") || out.contains("Exception") {
+        return Err(format!("启动应用失败: {}", out.trim()));
+    }
+    Ok(display_id)
 }
 
 /// 未指定设备时的自动选择：

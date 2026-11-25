@@ -15,6 +15,8 @@ struct MirrorState {
     session: Mutex<Option<SessionHandle>>,
     relay_port: AtomicU16,
     hub: Mutex<Option<Hub>>,
+    /// 当前会话的应用投屏包名（None = 整屏投屏）。
+    app_package: Mutex<Option<String>>,
     /// 串行化 start/切换流程：防止设置页发起的切换与投屏窗口的自动恢复并发起会话。
     start_lock: tauri::async_runtime::Mutex<()>,
 }
@@ -25,6 +27,7 @@ fn state() -> &'static MirrorState {
         session: Mutex::new(None),
         relay_port: AtomicU16::new(0),
         hub: Mutex::new(None),
+        app_package: Mutex::new(None),
         start_lock: tauri::async_runtime::Mutex::new(()),
     })
 }
@@ -67,24 +70,26 @@ fn jar_path(app: &AppHandle) -> Result<std::path::PathBuf, String> {
 pub async fn mirror_start(
     app: AppHandle,
     serial: Option<String>,
+    app_package: Option<String>,
 ) -> Result<serde_json::Value, String> {
     // 串行化：同一时间只允许一个 start/切换流程
     let _start_guard = state().start_lock.lock().await;
 
     // 已在运行：
-    // - 未指定 serial 或指定 serial 与当前一致 → 复用
-    // - 指定了不同 serial → 视为切换设备：停掉旧会话后启动新会话
+    // - 设备 serial 与应用模式都一致（serial 未指定视为一致）→ 复用
+    // - 任一不同 → 视为切换：停掉旧会话后启动新会话
     //   （如 USB 切无线：tcpip 重启会杀死旧 USB 会话的 server，必须重建）
     let mut reuse: Option<(u16, String, String)> = None;
     let mut switch_from: Option<String> = None;
     {
         let guard = state().session.lock().unwrap();
         if let Some(session) = guard.as_ref() {
-            let same = match &serial {
+            let same_serial = match &serial {
                 Some(s) => *s == session.serial,
                 None => true,
             };
-            if same {
+            let same_app = state().app_package.lock().unwrap().as_ref() == app_package.as_ref();
+            if same_serial && same_app {
                 reuse = Some((
                     state().relay_port.load(Ordering::SeqCst),
                     session.device_name.clone(),
@@ -123,6 +128,7 @@ pub async fn mirror_start(
     let hub_for_session = hub.clone();
     let app_for_session = app.clone();
     let serial_for_session = serial.clone();
+    let app_pkg_for_session = app_package.clone();
     let handle = tauri::async_runtime::spawn_blocking(move || {
         session::start(
             &app_for_session,
@@ -130,6 +136,7 @@ pub async fn mirror_start(
             adb_path,
             jar,
             serial_for_session,
+            app_pkg_for_session,
         )
     })
     .await
@@ -144,6 +151,7 @@ pub async fn mirror_start(
     let session_serial = handle.serial.clone();
     *state().hub.lock().unwrap() = Some(hub);
     *state().session.lock().unwrap() = Some(handle);
+    *state().app_package.lock().unwrap() = app_package;
 
     // 记入设备历史（支持多台手机快速切换）
     let app_for_history = app.clone();
@@ -424,6 +432,28 @@ pub async fn mirror_connect_wireless(
 pub async fn mirror_stop(app: AppHandle) -> Result<(), String> {
     stop_session(&app);
     Ok(())
+}
+
+/// 列出第三方应用包名（应用投屏选择器）。优先取当前会话设备，否则取第一台已连设备。
+#[tauri::command]
+pub async fn mirror_list_apps(app: AppHandle) -> Result<serde_json::Value, String> {
+    let adb_path = adb::resolve_adb(Some(&app))?;
+    let pkgs = tauri::async_runtime::spawn_blocking(move || -> Result<Vec<String>, String> {
+        let serial = match state().session.lock().unwrap().as_ref() {
+            Some(s) => s.serial.clone(),
+            None => {
+                let serials = adb::list_device_serials(&adb_path)?;
+                serials
+                    .first()
+                    .ok_or_else(|| "未检测到已连接的安卓设备".to_string())?
+                    .clone()
+            }
+        };
+        adb::list_third_party_packages(&adb_path, &serial)
+    })
+    .await
+    .map_err(|e| e.to_string())??;
+    Ok(serde_json::json!({ "apps": pkgs }))
 }
 
 /// 查询投屏状态（供投屏窗口挂载时连接中继）。
@@ -712,6 +742,7 @@ pub fn stop_session(app: &AppHandle) {
         session.stop();
         log::info!("投屏会话已停止");
     }
+    *state().app_package.lock().unwrap() = None;
     let _ = app;
 }
 

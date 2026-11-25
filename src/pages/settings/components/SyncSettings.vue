@@ -161,6 +161,49 @@
         </div>
       </div>
 
+      <!-- 应用投屏：把指定 App 启动到虚拟显示器，手机可玩其他应用 -->
+      <div class="app-mirror">
+        <div class="mode-title">
+          应用投屏
+          <el-tag
+            size="small"
+            type="warning"
+          >
+            Beta
+          </el-tag>
+        </div>
+        <p class="mode-desc">
+          选择一个 App 投到独立的投屏窗口（需 Android 10+），期间手机屏幕可自由使用其他应用。
+          注意：对这个 App 的操作需要在投屏窗口内进行。
+        </p>
+        <div class="mode-actions">
+          <el-select
+            v-model="appPkg"
+            filterable
+            placeholder="选择应用（先连接手机）"
+            size="small"
+            class="app-select"
+            :loading="appsLoading"
+          >
+            <el-option
+              v-for="a in appList"
+              :key="a"
+              :label="a"
+              :value="a"
+            />
+          </el-select>
+          <el-button
+            type="primary"
+            plain
+            :loading="appStarting"
+            :disabled="!appPkg"
+            @click="onMirrorApp"
+          >
+            投屏该应用
+          </el-button>
+        </div>
+      </div>
+
       <!-- 历史设备：多台手机快速切换 -->
       <template v-if="deviceHistory.length">
         <div class="history-title">
@@ -220,6 +263,10 @@ const wirelessStarting = ref(false)
 const wirelessConnecting = ref(false)
 const deviceHistory = ref([])
 const reconnecting = ref('')
+const appList = ref([])
+const appPkg = ref('')
+const appsLoading = ref(false)
+const appStarting = ref(false)
 
 // 拉取历史设备（含在线标记）
 async function refreshDeviceHistory() {
@@ -256,6 +303,32 @@ async function onReconnectDevice(d) {
     ElMessage.error({message: parseErrorMessage(e) || String(e), duration: 6000})
   } finally {
     reconnecting.value = ''
+  }
+}
+
+// 应用投屏：把所选 App 启动到虚拟显示器（Android 10+）
+async function onMirrorApp() {
+  if (!appPkg.value) return
+  appStarting.value = true
+  try {
+    await MirrorService.start(undefined, appPkg.value)
+    ElMessage.success('应用投屏已开启，手机屏幕可自由使用其他应用')
+    refreshDeviceHistory()
+  } catch (e) {
+    ElMessage.error({message: parseErrorMessage(e) || String(e), duration: 8000})
+  } finally {
+    appStarting.value = false
+  }
+}
+
+// 拉取第三方应用列表（设备未连接时静默失败）
+async function loadAppList() {
+  appsLoading.value = true
+  try {
+    const r = await MirrorService.listApps()
+    appList.value = r.apps || []
+  } catch { /* 设备未连接：选择器显示占位 */ } finally {
+    appsLoading.value = false
   }
 }
 
@@ -441,6 +514,7 @@ async function onUnpair() {
 onMounted(async () => {
     await refreshStatus()
     refreshDeviceHistory()
+    loadAppList()
     // 记住用户选择：开启过同步则随设置页自动恢复
     if (localStorage.getItem('fuyun-sync-enabled') === '1' && !status.running) {
         await onToggle(true)
@@ -627,6 +701,44 @@ onUnmounted(() => {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+}
+
+/* 应用投屏块：复用卡片风格但独立成行 */
+.app-mirror {
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 10px;
+  padding: 14px 16px;
+  background: var(--fy-bg-card, transparent);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.app-mirror .mode-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--el-text-color-primary);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.app-mirror .mode-desc {
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+  line-height: 1.6;
+}
+
+.app-mirror .mode-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.app-select {
+  min-width: 220px;
 }
 
 .mode-card .el-button {
