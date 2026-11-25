@@ -73,6 +73,8 @@ pub struct SyncState {
     history: Mutex<Vec<HistoryItem>>,
     shutdown_tx: Mutex<Option<oneshot::Sender<()>>>,
     last_error: Mutex<Option<String>>,
+    /// 最近一次连接的手机 IP（非回环来源），供无线投屏自动预填
+    last_peer_ip: Mutex<Option<String>>,
     pc_name: String,
 }
 
@@ -90,6 +92,7 @@ fn shared() -> &'static Arc<SyncState> {
             history: Mutex::new(Vec::new()),
             shutdown_tx: Mutex::new(None),
             last_error: Mutex::new(None),
+            last_peer_ip: Mutex::new(None),
             pc_name: detect_pc_name(),
         })
     })
@@ -241,7 +244,11 @@ pub fn start(app: &AppHandle, app_state: Arc<Mutex<SharedAppState>>) -> Result<S
         tokio::net::TcpListener::from_std(std_listener).map_err(|e| e.to_string())?;
     let router = server::router(Arc::clone(state), app.clone(), app_state);
     tauri::async_runtime::spawn(async move {
-        let server = axum::serve(tokio_listener, router).with_graceful_shutdown(async {
+        let server = axum::serve(
+            tokio_listener,
+            router.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+        )
+        .with_graceful_shutdown(async {
             let _ = shutdown_rx.await;
         });
         if let Err(e) = server.await {
@@ -338,6 +345,8 @@ pub struct SyncStatus {
     pub pairing_expires_in_secs: i64,
     pub protocol_version: &'static str,
     pub last_error: Option<String>,
+    /// 最近一次连接的手机 WiFi IP（同步连接的来源地址），无线投屏自动预填用
+    pub device_ip: Option<String>,
 }
 
 pub fn status() -> SyncStatus {
@@ -364,6 +373,7 @@ fn status_snapshot(state: &SyncState) -> SyncStatus {
         pairing_expires_in_secs: code.as_ref().map(|c| c.remaining_secs(now)).unwrap_or(0),
         protocol_version: SYNC_PROTOCOL_VERSION,
         last_error: lock(&state.last_error).clone(),
+        device_ip: lock(&state.last_peer_ip).clone(),
     }
 }
 
@@ -430,6 +440,7 @@ mod tests {
             history: Mutex::new(Vec::new()),
             shutdown_tx: Mutex::new(None),
             last_error: Mutex::new(None),
+            last_peer_ip: Mutex::new(None),
             pc_name: "test-pc".to_string(),
         })
     }

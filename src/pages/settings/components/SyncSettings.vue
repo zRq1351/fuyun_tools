@@ -179,12 +179,15 @@ async function onEnableWireless() {
 
 // 手动 IP 连接：先尝试直连 5555，失败引导走无线调试配对（Android 11+）
 async function onConnectWireless() {
+  const knownIp = status.deviceIp || ''
   let ip
   try {
     const r = await ElMessageBox.prompt(
-      '请输入手机的 WiFi IP 地址（手机：设置 → WLAN → 当前网络 可查看）',
+      knownIp
+        ? `已检测到同步连接的手机 IP：${knownIp}。确认无误后点确定即可`
+        : '请输入手机的 WiFi IP 地址（手机：设置 → WLAN → 当前网络 可查看）',
       '无线投屏',
-      {inputPattern: /^\d{1,3}(\.\d{1,3}){3}$/, inputErrorMessage: 'IP 地址格式不正确'},
+      {inputValue: knownIp, inputPattern: /^\d{1,3}(\.\d{1,3}){3}$/, inputErrorMessage: 'IP 地址格式不正确'},
     )
     ip = r.value.trim()
   } catch { return }
@@ -239,6 +242,7 @@ const DEFAULT_STATUS = {
     pairingExpiresInSecs: 0,
     protocolVersion: '1',
     lastError: null,
+    deviceIp: null,
 }
 
 const status = reactive({...DEFAULT_STATUS})

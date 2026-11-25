@@ -6,8 +6,9 @@
 use std::sync::Arc;
 
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
-use axum::extract::{Query, State};
+use axum::extract::{ConnectInfo, Query, State};
 use axum::http::{header, HeaderMap, StatusCode};
+use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
@@ -31,6 +32,22 @@ struct ServerState {
 
 type ApiResult<T> = Result<T, StatusCode>;
 
+/// 记录最近一次请求来源 IP（排除本机回环）→ 同步状态暴露给无线投屏自动预填。
+async fn record_peer_ip(
+    State(state): State<ServerState>,
+    ConnectInfo(addr): ConnectInfo<std::net::SocketAddr>,
+    req: axum::extract::Request,
+    next: Next,
+) -> Response {
+    if !addr.ip().is_loopback() {
+        let ip = addr.ip().to_string();
+        if lock(&state.sync.last_peer_ip).as_deref() != Some(ip.as_str()) {
+            *lock(&state.sync.last_peer_ip) = Some(ip);
+        }
+    }
+    next.run(req).await
+}
+
 pub fn router(
     sync: Arc<SyncState>,
     app: AppHandle,
@@ -46,6 +63,14 @@ pub fn router(
         .route("/api/image", get(image_file))
         .route("/api/ws", get(ws_handler))
         .layer(axum::extract::DefaultBodyLimit::max(32 * 1024 * 1024))
+        .layer(axum::middleware::from_fn_with_state(
+            ServerState {
+                sync: Arc::clone(&sync),
+                app: app.clone(),
+                app_state: Arc::clone(&app_state),
+            },
+            record_peer_ip,
+        ))
         .with_state(ServerState {
             sync,
             app,
