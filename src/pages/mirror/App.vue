@@ -104,6 +104,15 @@
           </button>
           <button
             class="btn"
+            :class="{ active: wheelSwipeMode }"
+            :disabled="!connected"
+            :title="wheelSwipeMode ? '滚轮翻页已开启（滚轮=快速滑动，短视频直接翻页）；点击恢复平滑滚动' : '滚轮翻页：滚轮模拟快速滑动手势（看短视频用）'"
+            @click="toggleWheelSwipe"
+          >
+            <svg viewBox="0 0 24 24"><path d="M12 5v14M7.5 9.5 12 5l4.5 4.5M7.5 14.5 12 19l4.5-4.5" /></svg>
+          </button>
+          <button
+            class="btn"
             :class="{ active: screenOff }"
             :disabled="!connected"
             :title="screenOff ? '点亮手机屏幕' : '息屏投屏：关闭手机面板，投屏与控制继续'"
@@ -556,6 +565,11 @@ function onWheel(event) {
   // 一格滚轮 = 1；向下滚 → 内容向下（Android 负值）
   const vCells = event.deltaY > 0 ? -1 : 1
   const hCells = event.deltaX > 0 ? -1 : (event.deltaX < 0 ? 1 : 0)
+  // 滚轮翻页模式：垂直滚动转为触摸快滑（fling），短视频 App 直接翻页
+  if (wheelSwipeMode.value && vCells !== 0) {
+    wheelSwipeGesture(vCells, x, y)
+    return
+  }
   sendControl({ kind: 'scroll', x, y, w: videoW, h: videoH, dx: hCells, dy: vCells })
 }
 
@@ -963,6 +977,50 @@ function toggleScreenOff() {
   showToast(next ? '已息屏：手机面板关闭，投屏与控制继续' : '手机屏幕已点亮', 3000)
 }
 
+// 滚轮翻页模式：滚轮事件转为触摸快滑（fling），短视频 App 直接吸附翻页
+const wheelSwipeMode = ref(localStorage.getItem('fuyun-mirror-wheel-swipe') === '1')
+// 进行中的滚轮滑动动画（连续滚动时延长目标距离而不是叠加手势）
+let swipeGesture = null
+
+function toggleWheelSwipe() {
+  wheelSwipeMode.value = !wheelSwipeMode.value
+  localStorage.setItem('fuyun-mirror-wheel-swipe', wheelSwipeMode.value ? '1' : '0')
+  showToast(wheelSwipeMode.value
+    ? '滚轮翻页已开启：滚轮=快速滑动，短视频直接翻到下一个'
+    : '滚轮翻页已关闭：滚轮恢复平滑滚动', 3000)
+}
+
+// 把滚轮增量合成一次触摸快滑：down → 数个 move（~70ms）→ up，速度足以触发 fling
+function wheelSwipeGesture(cells, x, y) {
+  const dir = cells > 0 ? 1 : -1
+  if (swipeGesture) {
+    // 滑动进行中：延长目标（连续滚动合成一次更长的滑动）
+    const cap = 1200
+    const cur = swipeGesture.ty - swipeGesture.y
+    const want = cur + dir * 320 * Math.min(Math.abs(cells), 3)
+    swipeGesture.ty = swipeGesture.y + Math.max(-cap, Math.min(cap, want))
+    return
+  }
+  const D = 320 * Math.min(Math.abs(cells), 3)
+  sendControl({ kind: 'touch', action: 0, x, y, w: videoW, h: videoH, pressure: 1.0 })
+  swipeGesture = { x, y, tx: x, ty: y + dir * D, step: 0 }
+  const steps = 5
+  swipeGesture.timer = setInterval(() => {
+    if (!swipeGesture) { return }
+    swipeGesture.step++
+    const p = swipeGesture
+    const cx = p.x + (p.tx - p.x) * (p.step / steps)
+    const cy = p.y + (p.ty - p.y) * (p.step / steps)
+    if (p.step >= steps) {
+      clearInterval(p.timer)
+      sendControl({ kind: 'touch', action: 1, x: cx, y: cy, w: videoW, h: videoH, pressure: 0 })
+      swipeGesture = null
+    } else {
+      sendControl({ kind: 'touch', action: 2, x: cx, y: cy, w: videoW, h: videoH, pressure: 1.0 })
+    }
+  }, 14)
+}
+
 async function recoverSession() {
   if (stopped || recovering) return
   const now = Date.now()
@@ -1071,6 +1129,7 @@ onMounted(async () => {
 onUnmounted(() => {
   stopped = true
   if (watchdogTimer) { clearInterval(watchdogTimer); watchdogTimer = null }
+  if (swipeGesture) { clearInterval(swipeGesture.timer); swipeGesture = null }
   if (unlistenResize) { unlistenResize(); unlistenResize = null }
   if (unlistenDrag) { unlistenDrag(); unlistenDrag = null }
   window.removeEventListener('keydown', onKeydown)
