@@ -23,13 +23,46 @@ use super::relay::Hub;
 
 /// 与随包 scrcpy-server 版本严格一致（server 校验，无兼容窗口）
 pub const SCRCPY_VERSION: &str = "5.0.1";
-/// server 参数里限制视频长边的像素
-const MAX_SIZE: u32 = 1600;
-/// 视频码率
-const BIT_RATE: u32 = 8_000_000;
-/// 帧率上限
-const MAX_FPS: u32 = 30;
 const DEVICE_NAME_LEN: usize = 64;
+
+/// 视频参数档位（设置页「画质模式」）。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct VideoProfile {
+    /// 视频长边像素上限；0 = 原生分辨率（不缩放）
+    pub max_size: u32,
+    pub bit_rate: u32,
+    pub max_fps: u32,
+}
+
+/// 画质模式 → 视频参数。未知模式回退均衡档。
+pub fn profile_from_mode(mode: &str) -> VideoProfile {
+    match mode {
+        // 省流量：适合弱网/2.4G
+        "smooth" => VideoProfile {
+            max_size: 1280,
+            bit_rate: 6_000_000,
+            max_fps: 30,
+        },
+        // 高清：高刷新率，USB 首选
+        "hd" => VideoProfile {
+            max_size: 1920,
+            bit_rate: 16_000_000,
+            max_fps: 60,
+        },
+        // 原生：满分辨率 + 60fps + 高码率，接近手机原生体验
+        "native" => VideoProfile {
+            max_size: 0,
+            bit_rate: 24_000_000,
+            max_fps: 60,
+        },
+        // 均衡（默认）
+        _ => VideoProfile {
+            max_size: 1600,
+            bit_rate: 8_000_000,
+            max_fps: 30,
+        },
+    }
+}
 
 pub struct SessionHandle {
     pub hub: Hub,
@@ -72,6 +105,7 @@ pub struct StartOutcome {
 /// `preferred_serial`：优先使用的设备序列号（无线投屏时为 `ip:port`）。
 /// `app_package`：提供时启用应用投屏——server 创建虚拟显示器（new_display），
 /// 会话建立后把该应用启动到虚拟屏上，手机物理屏幕可自由使用。
+/// `profile`：视频参数档位（画质模式）。
 pub fn start(
     app: &tauri::AppHandle,
     hub: Hub,
@@ -79,6 +113,7 @@ pub fn start(
     jar_path: std::path::PathBuf,
     preferred_serial: Option<String>,
     app_package: Option<String>,
+    profile: VideoProfile,
 ) -> Result<SessionHandle, String> {
     let serials = adb::list_device_serials(&adb_path)?;
     log::info!("[mirror] 发现设备: {:?}", serials);
@@ -132,7 +167,7 @@ pub fn start(
          video_codec_options=i-frame-interval=2 \
          send_dummy_byte=false send_device_meta=true send_frame_meta=true \
          send_stream_meta=true tunnel_forward=false",
-        scid, MAX_SIZE, BIT_RATE, MAX_FPS
+        scid, profile.max_size, profile.bit_rate, profile.max_fps
     );
     if app_package.is_some() {
         // 虚拟显示器：该 server 要求显式 <宽>x<高>（new_display=true 会崩），
@@ -145,6 +180,12 @@ pub fn start(
         options.push_str(&format!(" {}", opt));
     }
     let child = adb::start_server(&adb_path, &serial, &options, server_log.as_ref())?;
+    log::info!(
+        "[mirror] 画质参数: max_size={} bit_rate={} max_fps={}",
+        profile.max_size,
+        profile.bit_rate,
+        profile.max_fps
+    );
     let child = Arc::new(Mutex::new(Some(child)));
 
     // 失败清理所需的独立副本（build 闭包会把原值移入 SessionHandle）
@@ -672,5 +713,27 @@ mod tests {
             dedupe_prefer_usb(entries),
             vec!["ABC123", "192.168.0.5:5555"]
         );
+    }
+}
+
+#[cfg(test)]
+mod profile_tests {
+    use super::profile_from_mode;
+
+    #[test]
+    fn profiles_map_all_modes() {
+        let smooth = profile_from_mode("smooth");
+        assert_eq!((smooth.max_size, smooth.max_fps), (1280, 30));
+        let balanced = profile_from_mode("balanced");
+        assert_eq!((balanced.max_size, balanced.bit_rate), (1600, 8_000_000));
+        let hd = profile_from_mode("hd");
+        assert_eq!((hd.max_size, hd.max_fps), (1920, 60));
+        let native = profile_from_mode("native");
+        assert_eq!((native.max_size, native.max_fps), (0, 60));
+    }
+
+    #[test]
+    fn unknown_mode_falls_back_to_balanced() {
+        assert_eq!(profile_from_mode("whatever"), profile_from_mode("balanced"));
     }
 }

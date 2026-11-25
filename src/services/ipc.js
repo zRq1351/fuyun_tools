@@ -177,6 +177,8 @@ export const IPC_COMMANDS = {
     MIRROR_LIST_PHONE_FILES: 'mirror_list_phone_files',
     MIRROR_LIST_APPS: 'mirror_list_apps',
     MIRROR_FOREGROUND_APP: 'mirror_foreground_app',
+    MIRROR_GET_QUALITY: 'mirror_get_quality',
+    MIRROR_SET_QUALITY: 'mirror_set_quality',
     MIRROR_PULL_FILES: 'mirror_pull_files',
     MIRROR_ENABLE_WIRELESS: 'mirror_enable_wireless',
     MIRROR_CONNECT_WIRELESS: 'mirror_connect_wireless',
@@ -701,6 +703,8 @@ export const MirrorService = {
     reconnectDevice: (serial) => ipcInvoke(IPC_COMMANDS.MIRROR_RECONNECT_DEVICE, {serial}),
     listApps: () => ipcInvoke(IPC_COMMANDS.MIRROR_LIST_APPS, {}),
     foregroundApp: () => ipcInvoke(IPC_COMMANDS.MIRROR_FOREGROUND_APP, {}),
+    getQuality: () => ipcInvoke(IPC_COMMANDS.MIRROR_GET_QUALITY, {}),
+    setQuality: (mode) => ipcInvoke(IPC_COMMANDS.MIRROR_SET_QUALITY, {mode}),
 };
 
 export const BackupService = {

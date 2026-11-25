@@ -127,6 +127,7 @@ pub async fn mirror_start(
     let app_for_session = app.clone();
     let serial_for_session = serial.clone();
     let app_pkg_for_session = app_package.clone();
+    let profile = session::profile_from_mode(&load_quality_mode(&app));
     let handle = tauri::async_runtime::spawn_blocking(move || {
         session::start(
             &app_for_session,
@@ -135,6 +136,7 @@ pub async fn mirror_start(
             jar,
             serial_for_session,
             app_pkg_for_session,
+            profile,
         )
     })
     .await
@@ -179,6 +181,53 @@ pub async fn mirror_start(
         "appPackage": app_pkg_resp,
         "reused": false,
     }))
+}
+
+// ---------- 画质模式（视频参数档位） ----------
+
+const QUALITY_FILE: &str = "mirror_quality.txt";
+
+fn quality_file_path(app: &AppHandle) -> Result<std::path::PathBuf, String> {
+    let dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("获取数据目录失败: {}", e))?;
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    Ok(dir.join(QUALITY_FILE))
+}
+
+/// 读取画质模式（smooth/balanced/hd/native），文件缺失或非法时回退 balanced。
+fn load_quality_mode(app: &AppHandle) -> String {
+    let Ok(path) = quality_file_path(app) else {
+        return "balanced".into();
+    };
+    let Ok(text) = std::fs::read_to_string(&path) else {
+        return "balanced".into();
+    };
+    let mode = text.trim();
+    if matches!(mode, "smooth" | "balanced" | "hd" | "native") {
+        mode.to_string()
+    } else {
+        "balanced".into()
+    }
+}
+
+/// 查询当前画质模式。
+#[tauri::command]
+pub async fn mirror_get_quality(app: AppHandle) -> Result<serde_json::Value, String> {
+    Ok(serde_json::json!({ "mode": load_quality_mode(&app) }))
+}
+
+/// 设置画质模式（下次开启投屏生效）。
+#[tauri::command]
+pub async fn mirror_set_quality(app: AppHandle, mode: String) -> Result<(), String> {
+    if !matches!(mode.as_str(), "smooth" | "balanced" | "hd" | "native") {
+        return Err(format!("未知画质模式: {}", mode));
+    }
+    let path = quality_file_path(&app)?;
+    std::fs::write(&path, &mode).map_err(|e| format!("保存画质设置失败: {}", e))?;
+    log::info!("[mirror] 画质模式已设为: {}", mode);
+    Ok(())
 }
 
 // ---------- 设备历史（多台手机快速切换） ----------

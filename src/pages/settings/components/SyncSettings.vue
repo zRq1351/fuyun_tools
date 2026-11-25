@@ -161,6 +161,37 @@
         </div>
       </div>
 
+      <!-- 画质模式 -->
+      <div class="quality-block">
+        <div class="mode-title">
+          画质模式
+        </div>
+        <p class="mode-desc">
+          影响清晰度、流畅度与延迟；切换后下次开启投屏生效（USB 带宽充裕，可选更高档位）。
+        </p>
+        <div class="quality-row">
+          <el-radio-group
+            v-model="qualityMode"
+            size="small"
+            @change="onQualityChange"
+          >
+            <el-radio-button value="smooth">
+              流畅
+            </el-radio-button>
+            <el-radio-button value="balanced">
+              均衡
+            </el-radio-button>
+            <el-radio-button value="hd">
+              高清 60fps
+            </el-radio-button>
+            <el-radio-button value="native">
+              原生
+            </el-radio-button>
+          </el-radio-group>
+          <span class="quality-hint">{{ qualityHint }}</span>
+        </div>
+      </div>
+
       <!-- 应用投屏：把指定 App 启动到虚拟显示器，手机可玩其他应用 -->
       <div class="app-mirror">
         <div class="mode-title">
@@ -267,6 +298,32 @@ const appList = ref([])
 const appPkg = ref('')
 const appsLoading = ref(false)
 const appStarting = ref(false)
+const qualityMode = ref('balanced')
+
+const QUALITY_HINTS = {
+  smooth: '长边 1280 · 30fps · 6Mbps — 省流量，适合弱网',
+  balanced: '长边 1600 · 30fps · 8Mbps — 延迟与画质均衡（默认）',
+  hd: '长边 1920 · 60fps · 16Mbps — 高刷顺滑，USB 首选',
+  native: '原生分辨率 · 60fps · 24Mbps — 接近手机原生体验，建议 USB',
+}
+const qualityHint = computed(() => QUALITY_HINTS[qualityMode.value] || '')
+
+// 保存画质模式（后端持久化，下次开启投屏生效）
+async function onQualityChange(mode) {
+  try {
+    await MirrorService.setQuality(mode)
+    ElMessage.success('画质模式已保存，重开投屏后生效')
+  } catch (e) {
+    ElMessage.error({message: parseErrorMessage(e) || String(e), duration: 5000})
+  }
+}
+
+async function loadQuality() {
+  try {
+    const r = await MirrorService.getQuality()
+    if (r && r.mode) qualityMode.value = r.mode
+  } catch { /* 读取失败保持默认 */ }
+}
 
 // 拉取历史设备（含在线标记）
 async function refreshDeviceHistory() {
@@ -515,6 +572,7 @@ onMounted(async () => {
     await refreshStatus()
     refreshDeviceHistory()
     loadAppList()
+    loadQuality()
     // 记住用户选择：开启过同步则随设置页自动恢复
     if (localStorage.getItem('fuyun-sync-enabled') === '1' && !status.running) {
         await onToggle(true)
@@ -701,6 +759,42 @@ onUnmounted(() => {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+}
+
+/* 画质模式块 */
+.quality-block {
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 10px;
+  padding: 14px 16px;
+  background: var(--fy-bg-card, transparent);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.quality-block .mode-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--el-text-color-primary);
+}
+
+.quality-block .mode-desc {
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+  line-height: 1.6;
+}
+
+.quality-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.quality-hint {
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
 }
 
 /* 应用投屏块：复用卡片风格但独立成行 */
