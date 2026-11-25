@@ -1,1 +1,0 @@
-import{g as c}from"./webviewWindow-C8Ag5cPn.js";function g(n={}){const{debounceMs:e=220,fallback:t=null}=n;let r=0;async function o(){const a=Date.now();if(!(a-r<e)){r=a;try{await c().startDragging()}catch{if(t)try{await t()}catch{}}}}return{startDrag:o}}export{g as u};

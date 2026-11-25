@@ -33,3 +33,4 @@ src-tauri/target/
 
 # build outputs
 output/
+*dist_bak*/

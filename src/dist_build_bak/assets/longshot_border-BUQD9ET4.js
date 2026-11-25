@@ -1,1 +1,0 @@
-import{_ as c,c as e}from"./_plugin-vue_export-helper-CZefEDsT.js";import{I as a,M as o}from"./vendor-vue-AxxJL1Um.js";import"./vendor-element-plus-DQ5OcLYL.js";const r={},t={class:"frame"};function s(n,p){return a(),o("div",t)}const _=c(r,[["render",s],["__scopeId","data-v-af16caf7"]]);e(_);
