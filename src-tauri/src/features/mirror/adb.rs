@@ -209,3 +209,40 @@ pub fn bind_local_listener() -> Result<(TcpListener, u16), String> {
     let port = listener.local_addr().map_err(|e| e.to_string())?.port();
     Ok((listener, port))
 }
+
+/// 切换设备到 TCP/IP 调试模式（默认端口 5555）。要求 USB 已连接。
+pub fn enable_tcpip(adb: &std::path::Path, serial: &str) -> Result<(), String> {
+    run_adb(adb, &["-s", serial, "tcpip", "5555"], Duration::from_secs(10)).map(|_| ())
+}
+
+/// 读取设备 wlan0 的 IPv4 地址。
+pub fn get_wlan_ip(adb: &std::path::Path, serial: &str) -> Result<String, String> {
+    let out = run_adb(
+        adb,
+        &["-s", serial, "shell", "ip", "-f", "inet", "-o", "addr", "show", "wlan0"],
+        Duration::from_secs(10),
+    )?;
+    // 行如: wlan0  inet 192.168.0.104/24 brd ... scope global ...
+    for line in out.lines() {
+        if let Some(idx) = line.find("inet ") {
+            let rest = &line[idx + 5..];
+            if let Some(end) = rest.find('/') {
+                let ip = rest[..end].trim();
+                if ip.split('.').count() == 4 && !ip.starts_with("127.") {
+                    return Ok(ip.to_string());
+                }
+            }
+        }
+    }
+    Err("未能获取手机 WiFi IP（wlan0 未连接？）".into())
+}
+
+/// adb connect 到无线设备（ip:port）。返回原始输出（含成功/失败信息）。
+pub fn connect_wireless(adb: &std::path::Path, address: &str) -> Result<String, String> {
+    run_adb(adb, &["connect", address], Duration::from_secs(15))
+}
+
+/// adb pair（Android 11+ 无线调试配对）。address 为手机显示的配对地址端口。
+pub fn pair_wireless(adb: &std::path::Path, address: &str, code: &str) -> Result<String, String> {
+    run_adb(adb, &["pair", address, code], Duration::from_secs(15))
+}

@@ -69,27 +69,39 @@ pub struct StartOutcome {
 }
 
 /// 启动一次完整会话。阻塞调用（含 adb 命令与 socket 握手），应在线程池中执行。
+/// `preferred_serial`：优先使用的设备序列号（无线投屏时为 `ip:port`）。
 pub fn start(
     app: &tauri::AppHandle,
     hub: Hub,
     adb_path: std::path::PathBuf,
     jar_path: std::path::PathBuf,
+    preferred_serial: Option<String>,
 ) -> Result<SessionHandle, String> {
     let serials = adb::list_device_serials(&adb_path)?;
     log::info!("[mirror] 发现设备: {:?}", serials);
-    let serial = match serials.len() {
-        0 => {
-            log::error!("[mirror] 未检测到已连接的安卓设备");
-            return Err("未检测到已连接的安卓设备（请用 USB 连接并授权调试）".into());
-        }
-        1 => serials[0].clone(),
-        _ => {
-            log::error!("[mirror] 检测到 {} 台设备，暂不支持选择", serials.len());
+    if serials.is_empty() {
+        log::error!("[mirror] 未检测到已连接的安卓设备");
+        return Err("未检测到已连接的安卓设备（请用 USB 连接并授权调试，或先建立无线连接）".into());
+    }
+    let serial = match preferred_serial {
+        Some(ref want) if serials.iter().any(|s| s == want) => want.clone(),
+        Some(ref want) => {
             return Err(format!(
-                "检测到多台设备（{} 台），暂不支持选择",
-                serials.len()
+                "指定的设备 {} 未连接（当前已连接: {}）",
+                want,
+                serials.join(", ")
             ));
         }
+        None => match serials.len() {
+            1 => serials[0].clone(),
+            _ => {
+                log::error!("[mirror] 检测到 {} 台设备，暂不支持自动选择", serials.len());
+                return Err(format!(
+                    "检测到多台设备（{} 台），请在连接时指定",
+                    serials.len()
+                ));
+            }
+        },
     };
 
     let scid: u32 = rand_u31();

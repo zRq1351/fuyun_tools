@@ -176,6 +176,8 @@ export const IPC_COMMANDS = {
     MIRROR_EXPORT_RECENT: 'mirror_export_recent',
     MIRROR_LIST_PHONE_FILES: 'mirror_list_phone_files',
     MIRROR_PULL_FILES: 'mirror_pull_files',
+    MIRROR_ENABLE_WIRELESS: 'mirror_enable_wireless',
+    MIRROR_CONNECT_WIRELESS: 'mirror_connect_wireless',
 
     // 剪贴板插件
     CLIPBOARD_READ_TEXT: 'plugin:clipboard-manager|read_text',
@@ -680,10 +682,12 @@ export const SyncService = {
 }
 
 export const MirrorService = {
-    start: () => ipcInvoke(IPC_COMMANDS.MIRROR_START),
+    start: (serial) => ipcInvoke(IPC_COMMANDS.MIRROR_START, serial ? {serial} : {}),
     stop: () => ipcInvoke(IPC_COMMANDS.MIRROR_STOP),
     getStatus: () => ipcInvoke(IPC_COMMANDS.MIRROR_STATUS),
     pushFile: (path) => ipcInvoke(IPC_COMMANDS.MIRROR_PUSH_FILE, {path}),
+    enableWireless: () => ipcInvoke(IPC_COMMANDS.MIRROR_ENABLE_WIRELESS, {}),
+    connectWireless: (opts) => ipcInvoke(IPC_COMMANDS.MIRROR_CONNECT_WIRELESS, opts || {}),
 };
 
 export const BackupService = {

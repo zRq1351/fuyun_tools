@@ -58,9 +58,13 @@ fn jar_path(app: &AppHandle) -> Result<std::path::PathBuf, String> {
 }
 
 /// 启动（或复用）投屏会话，并打开投屏窗口。
+/// `serial`：优先使用的设备（无线投屏时为 `ip:port`），不传则用唯一已连设备。
 /// 返回给前端的信息供投屏页面连接中继。
 #[tauri::command]
-pub async fn mirror_start(app: AppHandle) -> Result<serde_json::Value, String> {
+pub async fn mirror_start(
+    app: AppHandle,
+    serial: Option<String>,
+) -> Result<serde_json::Value, String> {
     // 已在运行：直接返回现有信息
     if let Some(session) = state().session.lock().unwrap().as_ref() {
         let port = state().relay_port.load(Ordering::SeqCst);
@@ -68,6 +72,7 @@ pub async fn mirror_start(app: AppHandle) -> Result<serde_json::Value, String> {
         return Ok(serde_json::json!({
             "relayPort": port,
             "deviceName": session.device_name,
+            "serial": session.serial,
             "reused": true,
         }));
     }
@@ -85,8 +90,9 @@ pub async fn mirror_start(app: AppHandle) -> Result<serde_json::Value, String> {
     // 会话启动是阻塞流程（adb + 握手），放线程池
     let hub_for_session = hub.clone();
     let app_for_session = app.clone();
+    let serial_for_session = serial.clone();
     let handle = tauri::async_runtime::spawn_blocking(move || {
-        session::start(&app_for_session, hub_for_session, adb_path, jar)
+        session::start(&app_for_session, hub_for_session, adb_path, jar, serial_for_session)
     })
     .await
     .map_err(|e| format!("投屏任务失败: {}", e))??;
@@ -97,21 +103,116 @@ pub async fn mirror_start(app: AppHandle) -> Result<serde_json::Value, String> {
     state().relay_port.store(relay_port, Ordering::SeqCst);
 
     let device_name = handle.device_name.clone();
+    let session_serial = handle.serial.clone();
     *state().hub.lock().unwrap() = Some(hub);
     *state().session.lock().unwrap() = Some(handle);
 
     super::window::show_mirror_window(&app)?;
     log::info!(
-        "[mirror] 会话已建立: 设备={} 中继端口={} 窗口已打开",
+        "[mirror] 会话已建立: 设备={} 序列={} 中继端口={} 窗口已打开",
         device_name,
+        session_serial,
         relay_port
     );
 
     Ok(serde_json::json!({
         "relayPort": relay_port,
         "deviceName": device_name,
+        "serial": session_serial,
         "reused": false,
     }))
+}
+
+/// USB 一键切换无线投屏：把当前 USB 连接的手机切到 TCP/IP 调试（5555），
+/// 读取手机 WiFi IP 后建立无线连接，返回无线 serial（`ip:5555`）。
+/// 成功后可拔掉 USB 线，用 mirror_start(serial) 以无线方式投屏。
+#[tauri::command]
+pub async fn mirror_enable_wireless(app: AppHandle) -> Result<serde_json::Value, String> {
+    let adb_path = adb::resolve_adb(Some(&app))?;
+    let adb_for_list = adb_path.clone();
+    let serials = tauri::async_runtime::spawn_blocking(move || -> Result<Vec<String>, String> {
+        adb::list_device_serials(&adb_for_list)
+    })
+    .await
+    .map_err(|e| e.to_string())??;
+    // 过滤出 USB 设备（无线 serial 形如 ip:port）
+    let usb: Vec<&String> = serials.iter().filter(|s| !s.contains(':')).collect();
+    if usb.is_empty() {
+        return Err("未检测到 USB 连接的手机：无线模式首次开启需要用 USB 连接一次".into());
+    }
+    let serial = usb[0].clone();
+
+    let adb = adb_path.clone();
+    let s2 = serial.clone();
+    let result = tauri::async_runtime::spawn_blocking(move || -> Result<String, String> {
+        adb::enable_tcpip(&adb, &s2)?;
+        // tcpip 重启 adbd，等待几秒后读 IP
+        std::thread::sleep(Duration::from_secs(2));
+        let ip = adb::get_wlan_ip(&adb, &s2)?;
+        let address = format!("{}:5555", ip);
+        // connect 可能需要多次尝试（adbd 重启中）
+        let mut last_err = String::new();
+        for _ in 0..5 {
+            let out = adb::connect_wireless(&adb, &address)?;
+            if out.contains("connected to") {
+                return Ok(address);
+            }
+            last_err = out;
+            std::thread::sleep(Duration::from_secs(2));
+        }
+        Err(format!("无线连接失败: {}", last_err))
+    })
+    .await
+    .map_err(|e| e.to_string())??;
+
+    log::info!("[mirror] 无线投屏已开启: {}", result);
+    Ok(serde_json::json!({ "serial": result }))
+}
+
+/// 无线调试配对/连接（Android 11+，无需 USB）。
+/// 手机需在「开发者选项 → 无线调试」中打开，并用「使用配对码配对设备」
+/// 获取配对 IP:端口与 6 位码。pair_code 提供时先配对，随后 connect 到 debug 端口。
+#[tauri::command]
+pub async fn mirror_connect_wireless(
+    app: AppHandle,
+    ip: String,
+    connect_port: Option<u16>,
+    pair_address: Option<String>,
+    pair_code: Option<String>,
+) -> Result<serde_json::Value, String> {
+    let adb_path = adb::resolve_adb(Some(&app))?;
+    let ip = ip.trim().to_string();
+    if ip.is_empty() || !ip.contains('.') {
+        return Err("请输入手机 WiFi 的 IP 地址".into());
+    }
+    let connect_port = connect_port.unwrap_or(5555);
+    let connect_addr = format!("{}:{}", ip, connect_port);
+
+    let adb = adb_path.clone();
+    let pair_addr = pair_address.clone();
+    let code = pair_code.clone();
+    let caddr = connect_addr.clone();
+    let out = tauri::async_runtime::spawn_blocking(move || -> Result<String, String> {
+        if let (Some(pa), Some(pc)) = (pair_addr.as_deref(), code.as_deref()) {
+            let r = adb::pair_wireless(&adb, pa, pc)?;
+            log::info!("[mirror] 无线配对结果: {}", r);
+            if !r.contains("Successfully") && !r.contains("paired") {
+                return Err(format!("配对失败: {}", r));
+            }
+        }
+        adb::connect_wireless(&adb, &caddr)
+    })
+    .await
+    .map_err(|e| e.to_string())??;
+
+    if !out.contains("connected to") {
+        return Err(format!(
+            "连接失败（{}）。请确认手机已打开「开发者选项 → 无线调试」，且电脑与手机在同一 WiFi",
+            out.trim()
+        ));
+    }
+    log::info!("[mirror] 无线连接成功: {}", connect_addr);
+    Ok(serde_json::json!({ "serial": connect_addr }))
 }
 
 /// 停止投屏会话。

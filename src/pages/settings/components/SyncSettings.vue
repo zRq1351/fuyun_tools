@@ -100,6 +100,7 @@
       <p class="hint">
         将手机画面实时投屏到电脑，并支持鼠标点击、滑动等反向控制。
         需要用 USB 数据线连接手机并授权调试（首次会推送投屏组件到手机）。
+        中文输入请先在投屏画面上点击手机输入框（键盘弹出后再打字）。
       </p>
       <el-button
         type="primary"
@@ -107,6 +108,28 @@
         @click="onStartMirror"
       >
         开启投屏
+      </el-button>
+    </div>
+
+    <!-- 无线投屏 -->
+    <div class="mirror-entry">
+      <h4>无线投屏</h4>
+      <p class="hint">
+        手机与电脑在同一 WiFi 下无线投屏，无需 USB 线（画面延迟略高于 USB）。
+        「USB 一键切换」需要先用数据线连接一次，之后即可拔线使用；
+        手机重启后无线模式失效，需重新插线切换。
+      </p>
+      <el-button
+        :loading="wirelessStarting"
+        @click="onEnableWireless"
+      >
+        USB 一键切换无线
+      </el-button>
+      <el-button
+        :loading="wirelessConnecting"
+        @click="onConnectWireless"
+      >
+        输入 IP 连接
       </el-button>
     </div>
   </div>
@@ -121,15 +144,88 @@ import {parseErrorMessage} from '../../../utils/errorHandler'
 
 const {t} = useI18n()
 const mirrorStarting = ref(false)
+const wirelessStarting = ref(false)
+const wirelessConnecting = ref(false)
 
-async function onStartMirror() {
+async function startMirrorWithSerial(serial) {
   mirrorStarting.value = true
   try {
-    await MirrorService.start()
+    await MirrorService.start(serial || undefined)
+    ElMessage.success('投屏已开启')
   } catch (e) {
     ElMessage.error({message: String(e), duration: 5000})
   } finally {
     mirrorStarting.value = false
+  }
+}
+
+async function onStartMirror() {
+  await startMirrorWithSerial(null)
+}
+
+// USB 一键切换无线：tcpip 5555 + 读手机 WiFi IP + connect，随后直接开投屏
+async function onEnableWireless() {
+  wirelessStarting.value = true
+  try {
+    const r = await MirrorService.enableWireless()
+    ElMessage.success(`无线连接已建立（${r.serial}），现在可以拔掉 USB 线`)
+    await startMirrorWithSerial(r.serial)
+  } catch (e) {
+    ElMessage.error({message: parseErrorMessage(e) || String(e), duration: 6000})
+  } finally {
+    wirelessStarting.value = false
+  }
+}
+
+// 手动 IP 连接：先尝试直连 5555，失败引导走无线调试配对（Android 11+）
+async function onConnectWireless() {
+  let ip
+  try {
+    const r = await ElMessageBox.prompt(
+      '请输入手机的 WiFi IP 地址（手机：设置 → WLAN → 当前网络 可查看）',
+      '无线投屏',
+      {inputPattern: /^\d{1,3}(\.\d{1,3}){3}$/, inputErrorMessage: 'IP 地址格式不正确'},
+    )
+    ip = r.value.trim()
+  } catch { return }
+
+  wirelessConnecting.value = true
+  try {
+    let r
+    try {
+      r = await MirrorService.connectWireless({ip})
+    } catch {
+      // 直连失败 → 引导配对流程（无线调试端口随机，需配对后按显示端口连接）
+      ElMessage.info({message: '直连失败，请改用「无线调试」配对：手机 → 开发者选项 → 无线调试 → 使用配对码配对设备', duration: 8000})
+      const pr = await ElMessageBox.prompt(
+        '输入手机无线调试弹窗中显示的「配对 IP 地址与端口」（如 192.168.0.5:37845）',
+        '无线配对',
+        {inputPattern: /^\d{1,3}(\.\d{1,3}){3}:\d+$/, inputErrorMessage: '格式应为 IP:端口'},
+      )
+      const pc = await ElMessageBox.prompt('输入 6 位配对码', '无线配对', {inputPattern: /^\d{6}$/, inputErrorMessage: '应为 6 位数字'})
+      const cr = await ElMessageBox.prompt(
+        '配对成功后，输入无线调试页面上显示的「IP 地址与端口」（无线调试主界面第一行）',
+        '连接无线调试',
+        {inputPattern: /^\d{1,3}(\.\d{1,3}){3}:\d+$/, inputErrorMessage: '格式应为 IP:端口'},
+      )
+      const [pairIp, pairPort] = pr.value.trim().split(':')
+      const [cIp, cPort] = cr.value.trim().split(':')
+      if (cIp !== ip) {
+        ElMessage.warning('两次输入的 IP 不同，将以最后一次为准')
+      }
+      r = await MirrorService.connectWireless({
+        ip: cIp,
+        connectPort: Number(cPort),
+        pairAddress: `${pairIp}:${pairPort}`,
+        pairCode: pc.value.trim(),
+      })
+    }
+    ElMessage.success(`无线连接成功（${r.serial}）`)
+    await startMirrorWithSerial(r.serial)
+  } catch (e) {
+    ElMessage.error({message: parseErrorMessage(e) || String(e), duration: 6000})
+  } finally {
+    wirelessConnecting.value = false
   }
 }
 
