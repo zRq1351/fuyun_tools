@@ -864,22 +864,24 @@ function onMouseMove(event) {
   barShow.value = event.clientY <= 48
 }
 
-// ---- 窗口随视频方向横竖切换 ----
-async function syncWindowOrientation() {
-  if (!videoW || !videoH) return
-  const wantLandscape = videoW > videoH
+// ---- 窗口尺寸贴合画面（右侧功能条 72px） ----
+const SIDE_STRIP_W = 72
+
+async function syncWindowSize() {
+  if (!videoW || !videoH || isFs.value) return
   const win = getCurrentWindow()
   try {
     const size = await win.innerSize()
     const scale = await win.scaleFactor()
-    const curW = size.width / scale
-    const curH = size.height / scale
-    const isLandscape = curW > curH
-    if (isLandscape !== wantLandscape) {
-      // 宽高互换，保持用户当前窗口大小比例
-      const w = Math.max(288, Math.round(curH))
-      const h = Math.max(288, Math.round(curW))
-      await win.setSize(new LogicalSize(w, h))
+    const curW = Math.round(size.width / scale)
+    const curH = Math.round(size.height / scale)
+    // 画面可用高度 = 窗口高 - 上下留白(24)；按视频宽高比推出显示宽
+    const dispH = Math.max(200, curH - 24)
+    const dispW = Math.round((dispH * videoW) / videoH)
+    // + 设备边框(18) + 右侧功能条(72)
+    const wantW = Math.max(288, dispW + 18 + SIDE_STRIP_W)
+    if (Math.abs(curW - wantW) > 6) {
+      await win.setSize(new LogicalSize(wantW, curH))
     }
   } catch { /* 窗口操作失败不影响画面 */ }
 }
@@ -899,7 +901,7 @@ function handleText(text) {
       const changed = videoW !== msg.width || videoH !== msg.height
       videoW = msg.width
       videoH = msg.height
-      if (changed) syncWindowOrientation()
+      if (changed) syncWindowSize()
       break
     }
     case 'stopped':
@@ -1521,6 +1523,12 @@ onUnmounted(() => {
   align-items: center;
   justify-content: center;
   overflow: hidden;
+  /* 右侧按钮条区域（悬浮面板所在），画面不侵入 */
+  padding-right: 72px;
+}
+
+.mirror-page.fullscreen .stage {
+  padding-right: 0;
 }
 
 .device {
@@ -1541,8 +1549,9 @@ onUnmounted(() => {
 
 .screen {
   display: block;
-  max-width: calc(100vw - 48px);
-  max-height: calc(100vh - 100px);
+  /* 右侧预留 72px 功能条区域，画面居中于剩余空间 */
+  max-width: calc(100vw - 72px);
+  max-height: calc(100vh - 24px);
   background: #000;
   cursor: pointer;
   touch-action: none;
