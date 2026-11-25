@@ -1,7 +1,11 @@
 import './disableContextMenu'
 import {createApp} from 'vue'
 // element-plus 样式由 unplugin 的 ElementPlusResolver 按组件按需注入（importStyle: 'css'），
-// 不再全量引入 dist/index.css（358KB），每个窗口只加载实际使用的组件样式
+// 不再全量引入 dist/index.css（358KB），每个窗口只加载实际使用的组件样式。
+// 但 ElMessageBox/ElMessage 是函数式调用（不经模板），按需注入覆盖不到——
+// 各页面普遍使用，在此统一补样式（否则弹窗无容器/遮罩/居中，元素裸奔）
+import 'element-plus/es/components/message-box/style/css'
+import 'element-plus/es/components/message/style/css'
 import 'element-plus/theme-chalk/dark/css-vars.css'
 import '../pages/shared/theme-variables.css'
 import '../pages/shared/windowBase.css'
