@@ -805,8 +805,13 @@ function handleText(text) {
       connected.value = false
       statusText.value = '已断开'
       if (!stopped) {
-        // 控制链路断开/流结束：自动重建会话（用户无感恢复）
-        if (msg.reason === 'control-writer' || msg.reason === 'control-reader' || msg.reason === 'stream-eof') {
+        // 控制链路断开/流结束/外部停止（如设备切换）：自动重建会话（用户无感恢复）
+        if (
+          msg.reason === 'control-writer'
+          || msg.reason === 'control-reader'
+          || msg.reason === 'stream-eof'
+          || msg.reason === 'stopped'
+        ) {
           recoverSession()
         } else {
           errorMsg.value = '投屏会话已结束（设备断开或被停止）'
@@ -871,6 +876,20 @@ async function recoverSession() {
   }
 }
 
+// ---- 会话看门狗：断连状态下每 3s 尝试重连 ----
+// 覆盖自动恢复失败后的场景（如 USB 切无线期间无设备），后端会话重建好后
+// MIRROR_START 走复用分支返回新中继端口，窗口自动接上画面。
+let watchdogTimer = null
+
+async function watchdogTick() {
+  if (stopped || connected.value || recovering) return
+  try {
+    if (ws) { try { ws.close() } catch { /* ignore */ } ws = null }
+    const info = await invoke(IPC_COMMANDS.MIRROR_START)
+    connectWebSocket(info.relayPort)
+  } catch { /* 会话未就绪（无设备/启动中），等下一轮 */ }
+}
+
 function connectWebSocket(port) {
   ws = new WebSocket(`ws://127.0.0.1:${port}/mirror`)
   ws.binaryType = 'arraybuffer'
@@ -918,6 +937,7 @@ onMounted(async () => {
   } catch { /* ignore */ }
   refocusKbd()
   window.addEventListener('focus', refocusKbd)
+  watchdogTimer = setInterval(watchdogTick, 3000)
   try {
     const info = await invoke(IPC_COMMANDS.MIRROR_START)
     connectWebSocket(info.relayPort)
@@ -930,6 +950,7 @@ onMounted(async () => {
 
 onUnmounted(() => {
   stopped = true
+  if (watchdogTimer) { clearInterval(watchdogTimer); watchdogTimer = null }
   if (unlistenResize) { unlistenResize(); unlistenResize = null }
   if (unlistenDrag) { unlistenDrag(); unlistenDrag = null }
   window.removeEventListener('keydown', onKeydown)

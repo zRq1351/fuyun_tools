@@ -15,6 +15,8 @@ struct MirrorState {
     session: Mutex<Option<SessionHandle>>,
     relay_port: AtomicU16,
     hub: Mutex<Option<Hub>>,
+    /// 串行化 start/切换流程：防止设置页发起的切换与投屏窗口的自动恢复并发起会话。
+    start_lock: tauri::async_runtime::Mutex<()>,
 }
 
 fn state() -> &'static MirrorState {
@@ -23,6 +25,7 @@ fn state() -> &'static MirrorState {
         session: Mutex::new(None),
         relay_port: AtomicU16::new(0),
         hub: Mutex::new(None),
+        start_lock: tauri::async_runtime::Mutex::new(()),
     })
 }
 
@@ -65,16 +68,45 @@ pub async fn mirror_start(
     app: AppHandle,
     serial: Option<String>,
 ) -> Result<serde_json::Value, String> {
-    // 已在运行：直接返回现有信息
-    if let Some(session) = state().session.lock().unwrap().as_ref() {
-        let port = state().relay_port.load(Ordering::SeqCst);
+    // 串行化：同一时间只允许一个 start/切换流程
+    let _start_guard = state().start_lock.lock().await;
+
+    // 已在运行：
+    // - 未指定 serial 或指定 serial 与当前一致 → 复用
+    // - 指定了不同 serial → 视为切换设备：停掉旧会话后启动新会话
+    //   （如 USB 切无线：tcpip 重启会杀死旧 USB 会话的 server，必须重建）
+    let mut reuse: Option<(u16, String, String)> = None;
+    let mut switch_from: Option<String> = None;
+    {
+        let guard = state().session.lock().unwrap();
+        if let Some(session) = guard.as_ref() {
+            let same = match &serial {
+                Some(s) => *s == session.serial,
+                None => true,
+            };
+            if same {
+                reuse = Some((
+                    state().relay_port.load(Ordering::SeqCst),
+                    session.device_name.clone(),
+                    session.serial.clone(),
+                ));
+            } else {
+                switch_from = Some(session.serial.clone());
+            }
+        }
+    }
+    if let Some((port, device_name, session_serial)) = reuse {
         super::window::show_mirror_window(&app)?;
         return Ok(serde_json::json!({
             "relayPort": port,
-            "deviceName": session.device_name,
-            "serial": session.serial,
+            "deviceName": device_name,
+            "serial": session_serial,
             "reused": true,
         }));
+    }
+    if let Some(from) = switch_from {
+        log::info!("[mirror] 切换设备: {} -> {:?}", from, serial);
+        stop_session(&app);
     }
 
     let adb_path = adb::resolve_adb(Some(&app)).map_err(|e| {
