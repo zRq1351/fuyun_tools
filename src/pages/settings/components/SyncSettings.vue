@@ -143,6 +143,10 @@
           class="history-device"
         >
           <span class="hd-name">{{ d.name }}</span>
+          <span
+            class="hd-conn"
+            :class="connLabel(d) === 'WiFi' ? 'is-wifi' : 'is-usb'"
+          >{{ connLabel(d) }}</span>
           <span class="hd-serial">{{ d.serial }}</span>
           <span
             v-if="d.online"
@@ -183,6 +187,11 @@ async function refreshDeviceHistory() {
     const r = await MirrorService.deviceHistory()
     deviceHistory.value = r.devices || []
   } catch { /* 忽略：历史不可用不影响主流程 */ }
+}
+
+// 连接方式徽标：WiFi / USB（兼容旧记录的 wireless 字段）
+function connLabel(d) {
+  return (d.connType === 'wireless' || d.wireless) ? 'WiFi' : 'USB'
 }
 
 // 历史设备一键重连：无线先 adb connect（幂等），再开启投屏
@@ -532,6 +541,27 @@ onUnmounted(() => {
   font-size: 12px;
   color: var(--el-text-color-secondary);
   font-family: monospace;
+}
+
+/* 连接方式徽标 */
+.history-device .hd-conn {
+  font-size: 11px;
+  padding: 0 6px;
+  border-radius: 3px;
+  line-height: 18px;
+  flex-shrink: 0;
+}
+
+.history-device .hd-conn.is-usb {
+  color: var(--el-color-primary);
+  border: 1px solid var(--el-color-primary-light-5, var(--el-color-primary));
+  background: var(--el-color-primary-light-9, transparent);
+}
+
+.history-device .hd-conn.is-wifi {
+  color: var(--el-color-success);
+  border: 1px solid var(--el-color-success-light-5, var(--el-color-success));
+  background: var(--el-color-success-light-9, transparent);
 }
 
 .history-device .hd-online {

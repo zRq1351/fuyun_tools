@@ -140,6 +140,24 @@ struct HistoryDevice {
     serial: String,
     name: String,
     last_used_ms: u64,
+    /// 最近一次连接方式："usb" / "wireless"。旧记录缺省时按 serial 推断。
+    #[serde(default)]
+    conn_type: String,
+}
+
+impl HistoryDevice {
+    /// 无线设备的 serial 形如 `ip:port`；USB 设备为硬件序列号。
+    fn derive_conn_type(serial: &str) -> &'static str {
+        if serial.contains(':') { "wireless" } else { "usb" }
+    }
+
+    fn conn_type_or_derived(&self) -> &str {
+        if self.conn_type.is_empty() {
+            Self::derive_conn_type(&self.serial)
+        } else {
+            &self.conn_type
+        }
+    }
 }
 
 fn history_file_path(app: &AppHandle) -> Result<std::path::PathBuf, String> {
@@ -169,14 +187,17 @@ fn record_device_history(app: &AppHandle, name: &str, serial: &str) -> Result<()
         .unwrap_or_default()
         .as_millis() as u64;
     let mut devices = load_history(app);
+    let conn_type = HistoryDevice::derive_conn_type(serial);
     if let Some(d) = devices.iter_mut().find(|d| d.serial == serial) {
         d.name = name.to_string();
         d.last_used_ms = now_ms;
+        d.conn_type = conn_type.to_string();
     } else {
         devices.push(HistoryDevice {
             serial: serial.to_string(),
             name: name.to_string(),
             last_used_ms: now_ms,
+            conn_type: conn_type.to_string(),
         });
     }
     devices.sort_by(|a, b| b.last_used_ms.cmp(&a.last_used_ms));
@@ -202,6 +223,7 @@ pub async fn mirror_device_history(app: AppHandle) -> Result<serde_json::Value, 
                 "serial": d.serial,
                 "name": d.name,
                 "lastUsedMs": d.last_used_ms,
+                "connType": d.conn_type_or_derived(),
                 "wireless": d.serial.contains(':'),
                 "online": online.iter().any(|s| s == &d.serial),
             })
