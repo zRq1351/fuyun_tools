@@ -401,59 +401,6 @@ pub async fn mirror_pull_files(
     Ok(res)
 }
 
-/// 拖拽导出：把手机文件作为虚拟文件拖到资源管理器/桌面（DoDragDrop + 延迟 adb pull）。
-#[tauri::command]
-pub async fn mirror_drag_export(items: Vec<super::dragout::DragItem>) -> Result<(), String> {
-    if items.is_empty() {
-        return Err("未选择任何文件".into());
-    }
-    let (adb_path, serial) = {
-        let guard = state().session.lock().unwrap();
-        match guard.as_ref() {
-            Some(s) => (s.adb_path.clone(), s.serial.clone()),
-            None => return Err("投屏会话未运行".into()),
-        }
-    };
-    log::info!("[mirror-drag] 开始拖拽导出 {} 个文件", items.len());
-    super::dragout::begin_drag(adb_path, serial, items)
-}
-
-/// 画布拖出：在投屏画面上按住并拖出窗口。
-/// 优先识别按下位置的真实文件（uiautomator dump + 按名搜索），
-/// 失败则拖出当前画面截图（由前端捕获的 PNG）。
-#[tauri::command]
-pub async fn mirror_drag_screen(
-    _app: AppHandle,
-    png: String,
-    x: i32,
-    y: i32,
-) -> Result<(), String> {
-    let (adb_path, serial) = {
-        let guard = state().session.lock().unwrap();
-        match guard.as_ref() {
-            Some(s) => (s.adb_path.clone(), s.serial.clone()),
-            None => return Err("投屏会话未运行".into()),
-        }
-    };
-    // png: dataURL 或纯 base64
-    let b64 = png.strip_prefix("data:image/png;base64,").unwrap_or(&png);
-    use base64::Engine as _;
-    let png_bytes = base64::engine::general_purpose::STANDARD
-        .decode(b64)
-        .map_err(|e| format!("截图数据解码失败: {}", e))?;
-    if png_bytes.is_empty() {
-        return Err("截图数据为空".into());
-    }
-
-    tauri::async_runtime::spawn_blocking(move || {
-        // DoDragDrop 立即启动（识别在拖放过程中并行进行，目标查询元数据时才等待结果）
-        if let Err(e) = super::dragout::begin_smart_drag(adb_path, serial, png_bytes, x, y) {
-            log::warn!("[mirror-drag] 启动拖放失败: {}", e);
-        }
-    });
-    Ok(())
-}
-
 /// 停止会话（供窗口销毁/退出时调用）。
 pub fn stop_session(app: &AppHandle) {
     if let Some(session) = state().session.lock().unwrap().take() {

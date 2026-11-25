@@ -176,8 +176,6 @@ export const IPC_COMMANDS = {
     MIRROR_EXPORT_RECENT: 'mirror_export_recent',
     MIRROR_LIST_PHONE_FILES: 'mirror_list_phone_files',
     MIRROR_PULL_FILES: 'mirror_pull_files',
-    MIRROR_DRAG_EXPORT: 'mirror_drag_export',
-    MIRROR_DRAG_SCREEN: 'mirror_drag_screen',
 
     // 剪贴板插件
     CLIPBOARD_READ_TEXT: 'plugin:clipboard-manager|read_text',

@@ -75,15 +75,6 @@
           >
             <svg viewBox="0 0 24 24"><path d="M12 4v10M8 10.5 12 14.5l4-4M5 19h14" /></svg>
           </button>
-          <button
-            class="btn"
-            :class="{ active: dragMode }"
-            :disabled="!connected"
-            :title="dragMode ? '退出拖出导出模式' : '拖出导出：按住画面内容拖到电脑'"
-            @click="toggleDragMode"
-          >
-            <svg viewBox="0 0 24 24"><path d="M6 18 18 6M9 6h9v9" /></svg>
-          </button>
         </div>
         <div class="seg win">
           <button
@@ -159,12 +150,6 @@
         松开传输到手机
       </div>
       <div
-        v-if="dragOverlay"
-        class="drag-overlay"
-      >
-        正在准备拖出（识别文件/截屏）…<br>拖到电脑桌面或文件夹后松手
-      </div>
-      <div
         v-if="toastMsg"
         class="toast"
       >
@@ -208,8 +193,7 @@
           </div>
           <div class="export-list">
             <div class="export-tip">
-              在手机画面上按住图片/文件拖出窗口即可传到电脑（相册、聊天图片、APP 界面图片均支持）；
-              也可勾选后「导出所选」，或按住文件行拖出
+              勾选文件后点「导出所选」即可保存到电脑
             </div>
             <div class="export-list">
               <template v-if="!exportLoading">
@@ -228,7 +212,6 @@
                     v-for="f in g.files"
                     :key="f.path"
                     class="export-item"
-                    @mousedown="onItemMouseDown(f, $event)"
                   >
                     <input
                       v-model="selectedPaths"
@@ -301,8 +284,6 @@ const statusText = ref('未连接')
 const isFs = ref(false)
 const barShow = ref(true)
 const dragging = ref(false)
-const dragOverlay = ref(false)
-const dragMode = ref(false)
 const toastMsg = ref('')
 let toastTimer = null
 const exportOpen = ref(false)
@@ -490,76 +471,19 @@ function videoPoint(event) {
   return { x, y }
 }
 
-// ---- 画布拖出：导出模式下按住内容拖动 >10px = OS 级拖出 ----
-let downClient = null // { cx, cy, devX, devY }
-let dragOutActive = false
-
-function toggleDragMode() {
-  dragMode.value = !dragMode.value
-  if (dragMode.value) {
-    showToast('拖出导出已开启：按住画面内容拖动（手机触摸已暂停）', 3000)
-  }
-}
-
 function onPointerDown(event) {
   if (!connected.value || !videoW) return
   if (event.button === 2) return // 右键不注入手机
   canvasRef.value.setPointerCapture(event.pointerId)
   pointerDown = true
-  dragOutActive = false
   const { x, y } = videoPoint(event)
-  downClient = { cx: event.clientX, cy: event.clientY, devX: x, devY: y }
-  if (!dragMode.value) {
-    sendControl({ kind: 'touch', action: 0, x, y, w: videoW, h: videoH, pressure: 1.0 })
-  }
+  sendControl({ kind: 'touch', action: 0, x, y, w: videoW, h: videoH, pressure: 1.0 })
 }
 
 function onPointerMove(event) {
   if (!connected.value || !pointerDown || !videoW) return
   const { x, y } = videoPoint(event)
-  // 拖出检测：导出模式下移动 >10px，或普通模式下指针离开窗口边界
-  if (!dragOutActive && downClient) {
-    const dx = event.clientX - downClient.cx
-    const dy = event.clientY - downClient.cy
-    const M = 4
-    const outside =
-      event.clientX < -M ||
-      event.clientY < -M ||
-      event.clientX > window.innerWidth + M ||
-      event.clientY > window.innerHeight + M
-    if ((dragMode.value && dx * dx + dy * dy > 100) || (!dragMode.value && outside)) {
-      dragOutActive = true
-      if (!dragMode.value) {
-        // 结束手机侧触摸，避免手机上残留拖动手势
-        sendControl({ kind: 'touch', action: 1, x, y, w: videoW, h: videoH, pressure: 1.0 })
-      }
-      startDragOut()
-      return
-    }
-  }
-  if (dragOutActive) return
-  if (!dragMode.value) {
-    sendControl({ kind: 'touch', action: 2, x, y, w: videoW, h: videoH, pressure: 1.0 })
-  }
-}
-
-async function startDragOut() {
-  if (!downClient || !videoW) return
-  dragOverlay.value = true
-  try {
-    // 捕获当前画面帧（同步 dataURL，约几十 ms）
-    const dataUrl = canvasRef.value.toDataURL('image/png')
-    await invoke(IPC_COMMANDS.MIRROR_DRAG_SCREEN, {
-      png: dataUrl,
-      x: downClient.devX,
-      y: downClient.devY,
-    })
-    showToast('已开始拖出：拖到桌面/文件夹后松手（识别文件中…）', 4000)
-  } catch (err) {
-    showToast(`拖出失败：${String(err)}`, 4000)
-  } finally {
-    setTimeout(() => { dragOverlay.value = false }, 800)
-  }
+  sendControl({ kind: 'touch', action: 2, x, y, w: videoW, h: videoH, pressure: 1.0 })
 }
 
 function onPointerUp(event) {
@@ -567,12 +491,8 @@ function onPointerUp(event) {
   if (connected.value && videoW) refocusKbd()
   if (!connected.value || !pointerDown || !videoW) return
   pointerDown = false
-  // 拖出模式下手机侧触摸已取消，不再补发 touch up
-  if (dragOutActive) return
   const { x, y } = videoPoint(event)
-  if (!dragMode.value) {
-    sendControl({ kind: 'touch', action: 1, x, y, w: videoW, h: videoH, pressure: 1.0 })
-  }
+  sendControl({ kind: 'touch', action: 1, x, y, w: videoW, h: videoH, pressure: 1.0 })
 }
 
 function onWheel(event) {
@@ -801,36 +721,6 @@ async function confirmExport() {
   }
 }
 
-// ---- 拖拽导出：按住文件拖出窗口，OS 级拖放到资源管理器/桌面 ----
-let pendingDrag = null
-
-function onItemMouseDown(f, e) {
-  if (e.button !== 0) return
-  pendingDrag = { x: e.clientX, y: e.clientY, item: f }
-}
-
-function onDragOutMove(e) {
-  if (!pendingDrag || !(e.buttons & 1)) {
-    pendingDrag = null
-    return
-  }
-  const dx = e.clientX - pendingDrag.x
-  const dy = e.clientY - pendingDrag.y
-  if (dx * dx + dy * dy < 36) return // 6px 拖动阈值，避免误触发点击
-  const f = pendingDrag.item
-  pendingDrag = null
-  if (!connected.value) return
-  // 拖动已勾选的文件时，拖出整组勾选项（同资源管理器多选拖拽语义）
-  const items = selectedPaths.value.includes(f.path)
-    ? phoneFiles.value.filter((x) => selectedPaths.value.includes(x.path))
-    : [f]
-  invoke(IPC_COMMANDS.MIRROR_DRAG_EXPORT, { items }).catch(() => {})
-}
-
-function onDragOutEnd() {
-  pendingDrag = null
-}
-
 async function closeWindow() {
   stopped = true
   // 关窗即断开：后端监听窗口 Destroyed 会停止会话
@@ -1001,8 +891,6 @@ onMounted(async () => {
     })
   } catch { /* ignore */ }
   window.addEventListener('keydown', onKeydown)
-  window.addEventListener('mousemove', onDragOutMove)
-  window.addEventListener('mouseup', onDragOutEnd)
   try {
     unlistenDrag = await getCurrentWebview().onDragDropEvent((ev) => {
       const p = ev.payload
@@ -1033,8 +921,6 @@ onUnmounted(() => {
   if (unlistenResize) { unlistenResize(); unlistenResize = null }
   if (unlistenDrag) { unlistenDrag(); unlistenDrag = null }
   window.removeEventListener('keydown', onKeydown)
-  window.removeEventListener('mousemove', onDragOutMove)
-  window.removeEventListener('mouseup', onDragOutEnd)
   window.removeEventListener('focus', refocusKbd)
   if (toastTimer) clearTimeout(toastTimer)
   if (ws) { try { ws.close() } catch { /* ignore */ } ws = null }
