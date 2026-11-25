@@ -902,7 +902,14 @@ function handleText(text) {
     case 'stopped':
       connected.value = false
       statusText.value = '已断开'
-      if (!stopped) errorMsg.value = '投屏会话已结束（设备断开或被停止）'
+      if (!stopped) {
+        // 控制链路断开/流结束：自动重建会话（用户无感恢复）
+        if (msg.reason === 'control-writer' || msg.reason === 'control-reader' || msg.reason === 'stream-eof') {
+          recoverSession()
+        } else {
+          errorMsg.value = '投屏会话已结束（设备断开或被停止）'
+        }
+      }
       break
     case 'clipboard':
       // 优先消费粘贴队列的写入确认；非队列触发的回显 = 手机端复制 → 提示
@@ -931,6 +938,35 @@ function handleBinary(buffer) {
     ensureDecoder(payload)
   }
   feedChunk(payload, isKey)
+}
+
+// ---- 会话自动恢复：控制链路/视频流异常断开时重建会话 ----
+let recovering = false
+let lastRecoverAt = 0
+
+async function recoverSession() {
+  if (stopped || recovering) return
+  const now = Date.now()
+  if (now - lastRecoverAt < 30000) {
+    errorMsg.value = '投屏连接中断，自动恢复间隔中（可手动停止后重新开启投屏）'
+    return
+  }
+  lastRecoverAt = now
+  recovering = true
+  showToast('投屏连接中断，正在自动恢复…', 4000)
+  try {
+    if (ws) { try { ws.close() } catch { /* ignore */ } ws = null }
+    if (decoder) { try { decoder.close() } catch { /* ignore */ } decoder = null }
+    videoW = 0
+    videoH = 0
+    await invoke(IPC_COMMANDS.MIRROR_STOP)
+    const info = await invoke(IPC_COMMANDS.MIRROR_START)
+    connectWebSocket(info.relayPort)
+  } catch (e) {
+    errorMsg.value = `自动恢复失败：${String(e)}（请手动停止后重新开启投屏）`
+  } finally {
+    recovering = false
+  }
 }
 
 function connectWebSocket(port) {

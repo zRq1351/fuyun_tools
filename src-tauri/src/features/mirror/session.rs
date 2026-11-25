@@ -180,9 +180,10 @@ pub fn start(
                 .map_err(|e| e.to_string())?;
         }
 
-        // 控制写线程
+        // 控制写线程：写失败必须广播（否则画面还在、操作全失效，用户无从感知）
         {
             let stop_flag = stop_flag.clone();
+            let hub = hub.clone();
             std::thread::Builder::new()
                 .name("mirror-control-writer".into())
                 .spawn(move || {
@@ -190,6 +191,15 @@ pub fn start(
                         match control_rx.recv_timeout(Duration::from_millis(500)) {
                             Ok(bytes) => {
                                 if control.write_all(&bytes).is_err() {
+                                    log::error!(
+                                        "[mirror] 控制链路写入失败，操作通道已断（画面流可能仍存活）"
+                                    );
+                                    if !stop_flag.load(Ordering::SeqCst) {
+                                        hub.send_text(
+                                            r#"{"type":"stopped","reason":"control-writer"}"#
+                                                .into(),
+                                        );
+                                    }
                                     break;
                                 }
                             }
@@ -409,6 +419,7 @@ fn run_device_msg_reader(control: &mut TcpStream, stop_flag: &AtomicBool, hub: &
     let mut u8_buf = [0u8; 1];
     let mut i64_buf = [0u8; 8];
     let mut msg_count = 0u64;
+    let mut abnormal = false;
     while !stop_flag.load(Ordering::SeqCst) {
         if let Err(e) = read_exact_loop(control, &mut u8_buf) {
             log::warn!(
@@ -416,14 +427,16 @@ fn run_device_msg_reader(control: &mut TcpStream, stop_flag: &AtomicBool, hub: &
                 msg_count,
                 e
             );
-            return;
+            abnormal = true;
+            break;
         }
         msg_count += 1;
         match u8_buf[0] {
             0 => {
                 if read_exact_loop(control, &mut u32_buf).is_err() {
                     log::warn!("[mirror] control reader: CLIPBOARD 长度读取失败");
-                    return;
+                    abnormal = true;
+                    break;
                 }
                 let len = u32::from_be_bytes(u32_buf) as usize;
                 let mut sink = vec![0u8; len];
@@ -432,7 +445,8 @@ fn run_device_msg_reader(control: &mut TcpStream, stop_flag: &AtomicBool, hub: &
                         "[mirror] control reader: CLIPBOARD 数据读取失败 (len={})",
                         len
                     );
-                    return;
+                    abnormal = true;
+                    break;
                 }
                 let text = String::from_utf8_lossy(&sink).to_string();
                 log::warn!("[mirror] 收到设备剪贴板 ({} 字节): {}", len, text);
@@ -441,23 +455,27 @@ fn run_device_msg_reader(control: &mut TcpStream, stop_flag: &AtomicBool, hub: &
             1 => {
                 if read_exact_loop(control, &mut i64_buf).is_err() {
                     log::warn!("[mirror] control reader: ACK 读取失败");
-                    return;
+                    abnormal = true;
+                    break;
                 }
             }
             2 => {
                 if read_exact_loop(control, &mut u16_buf).is_err() {
                     log::warn!("[mirror] control reader: UHID id 读取失败");
-                    return;
+                    abnormal = true;
+                    break;
                 }
                 if read_exact_loop(control, &mut u16_buf).is_err() {
                     log::warn!("[mirror] control reader: UHID len 读取失败");
-                    return;
+                    abnormal = true;
+                    break;
                 }
                 let len = u16::from_be_bytes(u16_buf) as usize;
                 let mut sink = vec![0u8; len];
                 if read_exact_loop(control, &mut sink).is_err() {
                     log::warn!("[mirror] control reader: UHID 数据读取失败 (len={})", len);
-                    return;
+                    abnormal = true;
+                    break;
                 }
             }
             other => {
@@ -465,8 +483,13 @@ fn run_device_msg_reader(control: &mut TcpStream, stop_flag: &AtomicBool, hub: &
                     "[mirror] control reader: 未知消息类型 {}，流错位退出",
                     other
                 );
-                return;
+                abnormal = true;
+                break;
             }
         }
+    }
+    // 非主动停止时退出 = 控制链路异常断开，广播给 viewer 触发自动恢复
+    if abnormal && !stop_flag.load(Ordering::SeqCst) {
+        hub.send_text(r#"{"type":"stopped","reason":"control-reader"}"#.into());
     }
 }
