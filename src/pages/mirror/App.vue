@@ -75,6 +75,15 @@
           >
             <svg viewBox="0 0 24 24"><path d="M12 4v10M8 10.5 12 14.5l4-4M5 19h14" /></svg>
           </button>
+          <button
+            class="btn"
+            :class="{ active: dragMode }"
+            :disabled="!connected"
+            :title="dragMode ? '退出拖出导出模式' : '拖出导出：按住画面内容拖到电脑'"
+            @click="toggleDragMode"
+          >
+            <svg viewBox="0 0 24 24"><path d="M6 18 18 6M9 6h9v9" /></svg>
+          </button>
         </div>
         <div class="seg win">
           <button
@@ -293,6 +302,7 @@ const isFs = ref(false)
 const barShow = ref(true)
 const dragging = ref(false)
 const dragOverlay = ref(false)
+const dragMode = ref(false)
 const toastMsg = ref('')
 let toastTimer = null
 const exportOpen = ref(false)
@@ -480,42 +490,57 @@ function videoPoint(event) {
   return { x, y }
 }
 
-// ---- 画布拖出：按住画面拖出窗口 = 智能导出（识别真实文件，兜底截屏）----
-let downClient = null // { x, y, devX, devY }
+// ---- 画布拖出：导出模式下按住内容拖动 >10px = OS 级拖出 ----
+let downClient = null // { cx, cy, devX, devY }
 let dragOutActive = false
+
+function toggleDragMode() {
+  dragMode.value = !dragMode.value
+  if (dragMode.value) {
+    showToast('拖出导出已开启：按住画面内容拖动（手机触摸已暂停）', 3000)
+  }
+}
 
 function onPointerDown(event) {
   if (!connected.value || !videoW) return
+  if (event.button === 2) return // 右键不注入手机
   canvasRef.value.setPointerCapture(event.pointerId)
   pointerDown = true
   dragOutActive = false
   const { x, y } = videoPoint(event)
   downClient = { cx: event.clientX, cy: event.clientY, devX: x, devY: y }
-  sendControl({ kind: 'touch', action: 0, x, y, w: videoW, h: videoH, pressure: 1.0 })
+  if (!dragMode.value) {
+    sendControl({ kind: 'touch', action: 0, x, y, w: videoW, h: videoH, pressure: 1.0 })
+  }
 }
 
 function onPointerMove(event) {
   if (!connected.value || !pointerDown || !videoW) return
   const { x, y } = videoPoint(event)
-  // 拖出检测：按住状态下指针离开窗口边界（带容差）→ OS 级拖出
-  // 窗口内的移动全部保持为手机触摸/滑动，互不冲突
+  // 拖出检测：导出模式下移动 >10px，或普通模式下指针离开窗口边界
   if (!dragOutActive && downClient) {
+    const dx = event.clientX - downClient.cx
+    const dy = event.clientY - downClient.cy
     const M = 4
-    if (
+    const outside =
       event.clientX < -M ||
       event.clientY < -M ||
       event.clientX > window.innerWidth + M ||
       event.clientY > window.innerHeight + M
-    ) {
+    if ((dragMode.value && dx * dx + dy * dy > 100) || (!dragMode.value && outside)) {
       dragOutActive = true
-      // 先结束手机侧触摸，避免手机上残留拖动手势
-      sendControl({ kind: 'touch', action: 1, x, y, w: videoW, h: videoH, pressure: 1.0 })
+      if (!dragMode.value) {
+        // 结束手机侧触摸，避免手机上残留拖动手势
+        sendControl({ kind: 'touch', action: 1, x, y, w: videoW, h: videoH, pressure: 1.0 })
+      }
       startDragOut()
       return
     }
   }
   if (dragOutActive) return
-  sendControl({ kind: 'touch', action: 2, x, y, w: videoW, h: videoH, pressure: 1.0 })
+  if (!dragMode.value) {
+    sendControl({ kind: 'touch', action: 2, x, y, w: videoW, h: videoH, pressure: 1.0 })
+  }
 }
 
 async function startDragOut() {
@@ -529,7 +554,7 @@ async function startDragOut() {
       x: downClient.devX,
       y: downClient.devY,
     })
-    showToast('识别文件中，拖到桌面/文件夹后松手即可…', 4000)
+    showToast('已开始拖出：拖到桌面/文件夹后松手（识别文件中…）', 4000)
   } catch (err) {
     showToast(`拖出失败：${String(err)}`, 4000)
   } finally {
@@ -545,7 +570,9 @@ function onPointerUp(event) {
   // 拖出模式下手机侧触摸已取消，不再补发 touch up
   if (dragOutActive) return
   const { x, y } = videoPoint(event)
-  sendControl({ kind: 'touch', action: 1, x, y, w: videoW, h: videoH, pressure: 1.0 })
+  if (!dragMode.value) {
+    sendControl({ kind: 'touch', action: 1, x, y, w: videoW, h: videoH, pressure: 1.0 })
+  }
 }
 
 function onWheel(event) {
@@ -570,8 +597,8 @@ const sendRotate = () => sendControl({ kind: 'rotate' })
 // ---- 电脑键盘输入文字 ----
 // scrcpy 单条 INJECT_TEXT 上限 300 字符，按码点分块。
 // 注意：INJECT_TEXT 走键盘字符映射，只支持 ASCII；中文等走
-// 「写设备剪贴板 + 注入 Ctrl+V」通道（legacy paste）。
-// 不用 SET_CLIPBOARD paste=true（KEYCODE_PASTE），部分系统（HyperOS）上不生效。
+// 「写设备剪贴板 → 等回显确认 → 注入 KEYCODE_PASTE」通道。
+// 实测（HyperOS）：PASTE 粘贴有效；Ctrl+V 会被手机输入法拦截（勿用）。
 function sendText(text) {
   if (!text || !connected.value) return
   const chars = [...text]
@@ -580,22 +607,42 @@ function sendText(text) {
     if (/^[\x20-\x7e\n\r\t]*$/.test(chunk)) {
       sendControl({ kind: 'text', text: chunk })
     } else {
-      sendControl({ kind: 'set-clipboard', paste: false, sequence: Date.now(), text: chunk })
-      // 等设备剪贴板写完再注入 Ctrl+V
-      setTimeout(sendCtrlV, 150)
+      pasteQueue.value.push(chunk)
+      if (pasteQueue.value.length === 1) processPasteQueue()
     }
   }
 }
 
-// 注入 Ctrl+V（AMETA_CTRL_ON | AMETA_CTRL_LEFT_ON = 0x3000）
-function sendCtrlV() {
-  const CTRL = 113
-  const V = 50
-  const META_CTRL = 0x3000
-  sendControl({ kind: 'keycode', action: 0, keycode: CTRL, repeat: 0, metaState: META_CTRL })
-  sendControl({ kind: 'keycode', action: 0, keycode: V, repeat: 0, metaState: META_CTRL })
-  sendControl({ kind: 'keycode', action: 1, keycode: V, repeat: 0, metaState: META_CTRL })
-  sendControl({ kind: 'keycode', action: 1, keycode: CTRL, repeat: 0, metaState: 0 })
+// 粘贴队列：写剪贴板 → 等设备回显确认内容已落 → 注入 KEYCODE_PASTE
+const pasteQueue = ref([])
+let pasteWatch = null
+
+function processPasteQueue() {
+  if (!pasteQueue.value.length) return
+  const chunk = pasteQueue.value[0]
+  sendControl({ kind: 'set-clipboard', paste: false, sequence: Date.now(), text: chunk })
+  if (pasteWatch) clearTimeout(pasteWatch)
+  // 兜底：回显异常丢失时 3s 后强制粘贴（避免卡队）
+  pasteWatch = setTimeout(() => firePaste(), 3000)
+}
+
+function onClipboardEcho(text) {
+  if (!pasteQueue.value.length) return false
+  const chunk = pasteQueue.value[0]
+  if (text && (text === chunk || text.endsWith(chunk))) {
+    if (pasteWatch) clearTimeout(pasteWatch)
+    firePaste()
+    return true
+  }
+  return false
+}
+
+function firePaste() {
+  pasteQueue.value.shift()
+  // KEYCODE_PASTE = 279
+  sendControl({ kind: 'keycode', action: 0, keycode: 279, repeat: 0, metaState: 0 })
+  setTimeout(() => sendControl({ kind: 'keycode', action: 1, keycode: 279, repeat: 0, metaState: 0 }), 40)
+  if (pasteQueue.value.length) setTimeout(processPasteQueue, 300)
 }
 
 // 特殊键 → Android keycode（Enter/Backspace/方向键等）
@@ -858,8 +905,10 @@ function handleText(text) {
       if (!stopped) errorMsg.value = '投屏会话已结束（设备断开或被停止）'
       break
     case 'clipboard':
-      // 手机剪贴板变化（autosync 回传）
-      if (msg.text) showToast(`手机剪贴板：${String(msg.text).slice(0, 40)}`, 2500)
+      // 优先消费粘贴队列的写入确认；非队列触发的回显 = 手机端复制 → 提示
+      if (!onClipboardEcho(String(msg.text || '')) && msg.text) {
+        showToast(`手机剪贴板：${String(msg.text).slice(0, 40)}`, 2500)
+      }
       break
     default:
       break
@@ -1131,6 +1180,16 @@ onUnmounted(() => {
 .seg .btn.close:hover:not(:disabled) {
   background: var(--danger-hover-bg);
   color: var(--danger-hover-text);
+}
+
+.seg .btn.active {
+  background: var(--accent);
+  color: #fff;
+}
+
+.seg .btn.active:hover:not(:disabled) {
+  background: var(--accent);
+  opacity: 0.9;
 }
 
 .btn {
