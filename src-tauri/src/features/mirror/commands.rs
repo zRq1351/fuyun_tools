@@ -76,10 +76,11 @@ pub async fn mirror_start(
     let _start_guard = state().start_lock.lock().await;
 
     // 已在运行：
-    // - 设备 serial 与应用模式都一致（serial 未指定视为一致）→ 复用
-    // - 任一不同 → 视为切换：停掉旧会话后启动新会话
+    // - 非显式请求（serial 与 appPackage 都未指定，如窗口重连/看门狗）→ 无条件复用现有会话
+    // - 显式请求：serial 与应用模式均一致 → 复用；任一不同 → 切换（停旧起新）
     //   （如 USB 切无线：tcpip 重启会杀死旧 USB 会话的 server，必须重建）
-    let mut reuse: Option<(u16, String, String)> = None;
+    let explicit = serial.is_some() || app_package.is_some();
+    let mut reuse: Option<serde_json::Value> = None;
     let mut switch_from: Option<String> = None;
     {
         let guard = state().session.lock().unwrap();
@@ -89,25 +90,22 @@ pub async fn mirror_start(
                 None => true,
             };
             let same_app = state().app_package.lock().unwrap().as_ref() == app_package.as_ref();
-            if same_serial && same_app {
-                reuse = Some((
-                    state().relay_port.load(Ordering::SeqCst),
-                    session.device_name.clone(),
-                    session.serial.clone(),
-                ));
+            if !explicit || (same_serial && same_app) {
+                reuse = Some(serde_json::json!({
+                    "relayPort": state().relay_port.load(Ordering::SeqCst),
+                    "deviceName": session.device_name.clone(),
+                    "serial": session.serial.clone(),
+                    "appPackage": state().app_package.lock().unwrap().clone(),
+                    "reused": true,
+                }));
             } else {
                 switch_from = Some(session.serial.clone());
             }
         }
     }
-    if let Some((port, device_name, session_serial)) = reuse {
+    if let Some(info) = reuse {
         super::window::show_mirror_window(&app)?;
-        return Ok(serde_json::json!({
-            "relayPort": port,
-            "deviceName": device_name,
-            "serial": session_serial,
-            "reused": true,
-        }));
+        return Ok(info);
     }
     if let Some(from) = switch_from {
         log::info!("[mirror] 切换设备: {} -> {:?}", from, serial);
@@ -151,6 +149,7 @@ pub async fn mirror_start(
     let session_serial = handle.serial.clone();
     *state().hub.lock().unwrap() = Some(hub);
     *state().session.lock().unwrap() = Some(handle);
+    let app_pkg_resp = app_package.clone();
     *state().app_package.lock().unwrap() = app_package;
 
     // 记入设备历史（支持多台手机快速切换）
@@ -177,6 +176,7 @@ pub async fn mirror_start(
         "relayPort": relay_port,
         "deviceName": device_name,
         "serial": session_serial,
+        "appPackage": app_pkg_resp,
         "reused": false,
     }))
 }
@@ -432,6 +432,26 @@ pub async fn mirror_connect_wireless(
 pub async fn mirror_stop(app: AppHandle) -> Result<(), String> {
     stop_session(&app);
     Ok(())
+}
+
+/// 读取手机当前前台应用（投屏窗口「独立投屏」按钮用）。
+#[tauri::command]
+pub async fn mirror_foreground_app(app: AppHandle) -> Result<serde_json::Value, String> {
+    let (adb_path, serial) = {
+        let guard = state().session.lock().unwrap();
+        match guard.as_ref() {
+            Some(s) => (s.adb_path.clone(), s.serial.clone()),
+            None => return Err("投屏会话未运行".into()),
+        }
+    };
+    let serial_for_query = serial.clone();
+    let package = tauri::async_runtime::spawn_blocking(move || {
+        adb::foreground_package(&adb_path, &serial_for_query)
+    })
+    .await
+    .map_err(|e| e.to_string())??;
+    log::info!("[mirror] 前台应用: {}", package);
+    Ok(serde_json::json!({ "package": package, "serial": serial }))
 }
 
 /// 列出第三方应用包名（应用投屏选择器）。优先取当前会话设备，否则取第一台已连设备。

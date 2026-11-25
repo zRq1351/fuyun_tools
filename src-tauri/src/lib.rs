@@ -743,6 +743,7 @@ pub fn run() {
             crate::features::mirror::commands::mirror_device_history,
             crate::features::mirror::commands::mirror_reconnect_device,
             crate::features::mirror::commands::mirror_list_apps,
+            crate::features::mirror::commands::mirror_foreground_app,
             resize_recording_toolbar,
             check_recording_ffmpeg,
             download_recording_ffmpeg,

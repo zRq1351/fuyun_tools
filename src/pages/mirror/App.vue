@@ -69,6 +69,41 @@
           </button>
           <button
             class="btn"
+            :class="{ active: appMode }"
+            :disabled="!connected"
+            :title="appMode ? '退出独立投屏（回到整屏）' : '独立投屏：把手机当前应用投到独立窗口，手机可自由使用'"
+            @click="toggleAppMirror"
+          >
+            <svg
+              v-if="!appMode"
+              viewBox="0 0 24 24"
+            ><rect
+              x="3.5"
+              y="3.5"
+              width="17"
+              height="17"
+              rx="2"
+            /><rect
+              x="9"
+              y="9"
+              width="9"
+              height="9"
+              rx="1.5"
+              class="fill"
+            /></svg>
+            <svg
+              v-else
+              viewBox="0 0 24 24"
+            ><rect
+              x="3.5"
+              y="3.5"
+              width="17"
+              height="17"
+              rx="2"
+            /><path d="M9 12h6M12 9l3 3-3 3" /></svg>
+          </button>
+          <button
+            class="btn"
             :disabled="!connected"
             title="导出手机最近文件/图片到电脑"
             @click="onExport"
@@ -804,8 +839,9 @@ function handleText(text) {
     case 'stopped':
       connected.value = false
       statusText.value = '已断开'
-      if (!stopped) {
+      if (!stopped && !externalSwitch) {
         // 控制链路断开/流结束/外部停止（如设备切换）：自动重建会话（用户无感恢复）
+        // externalSwitch：窗口自身正在切换会话（独立投屏），广播由切换流程自己处理
         if (
           msg.reason === 'control-writer'
           || msg.reason === 'control-reader'
@@ -851,6 +887,47 @@ function handleBinary(buffer) {
 let recovering = false
 let lastRecoverAt = 0
 
+// ---- 独立投屏（应用模式）状态 ----
+const appMode = ref(null) // 当前会话投的应用包名（null = 整屏）
+let currentSerial = null
+// 窗口自身发起会话切换期间为 true：抑制 stopped 广播触发的恢复与看门狗
+let externalSwitch = false
+
+async function switchSession(args) {
+  externalSwitch = true
+  try {
+    if (ws) { try { ws.close() } catch { /* ignore */ } ws = null }
+    if (decoder) { try { decoder.close() } catch { /* ignore */ } decoder = null }
+    videoW = 0
+    videoH = 0
+    const info = await invoke(IPC_COMMANDS.MIRROR_START, args)
+    currentSerial = info.serial || null
+    appMode.value = info.appPackage || null
+    connectWebSocket(info.relayPort)
+    showToast(info.appPackage ? `独立投屏已开启：${info.appPackage}（手机可自由使用）` : '已回到整屏投屏', 3000)
+  } catch (e) {
+    errorMsg.value = `切换失败：${String(e)}`
+    statusText.value = '未连接'
+  } finally {
+    externalSwitch = false
+  }
+}
+
+// 独立投屏开关：开启时把手机当前前台应用切到虚拟显示器，退出时恢复整屏
+async function toggleAppMirror() {
+  if (!connected.value) return
+  try {
+    if (appMode.value) {
+      await switchSession(currentSerial ? {serial: currentSerial} : {})
+    } else {
+      const fg = await invoke(IPC_COMMANDS.MIRROR_FOREGROUND_APP)
+      await switchSession({serial: fg.serial, appPackage: fg.package})
+    }
+  } catch (e) {
+    showToast(`独立投屏失败：${String(e)}`, 4000)
+  }
+}
+
 async function recoverSession() {
   if (stopped || recovering) return
   const now = Date.now()
@@ -868,6 +945,8 @@ async function recoverSession() {
     videoH = 0
     await invoke(IPC_COMMANDS.MIRROR_STOP)
     const info = await invoke(IPC_COMMANDS.MIRROR_START)
+    currentSerial = info.serial || null
+    appMode.value = info.appPackage || null
     connectWebSocket(info.relayPort)
   } catch (e) {
     errorMsg.value = `自动恢复失败：${String(e)}（请手动停止后重新开启投屏）`
@@ -882,10 +961,12 @@ async function recoverSession() {
 let watchdogTimer = null
 
 async function watchdogTick() {
-  if (stopped || connected.value || recovering) return
+  if (stopped || connected.value || recovering || externalSwitch) return
   try {
     if (ws) { try { ws.close() } catch { /* ignore */ } ws = null }
     const info = await invoke(IPC_COMMANDS.MIRROR_START)
+    currentSerial = info.serial || null
+    appMode.value = info.appPackage || null
     connectWebSocket(info.relayPort)
   } catch { /* 会话未就绪（无设备/启动中），等下一轮 */ }
 }
@@ -940,6 +1021,8 @@ onMounted(async () => {
   watchdogTimer = setInterval(watchdogTick, 3000)
   try {
     const info = await invoke(IPC_COMMANDS.MIRROR_START)
+    currentSerial = info.serial || null
+    appMode.value = info.appPackage || null
     connectWebSocket(info.relayPort)
   } catch (e) {
     stopped = true
@@ -1145,6 +1228,12 @@ onUnmounted(() => {
 .seg .btn.active:hover:not(:disabled) {
   background: var(--accent);
   opacity: 0.9;
+}
+
+/* 独立投屏图标：内层方块实心 */
+.seg .btn svg .fill {
+  fill: currentColor;
+  stroke: none;
 }
 
 .btn {

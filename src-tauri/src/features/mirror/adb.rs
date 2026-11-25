@@ -401,6 +401,36 @@ pub fn list_third_party_packages(
     Ok(pkgs)
 }
 
+/// 从 dumpsys activity activities 输出解析前台应用包名。
+/// 取 ResumedActivity 行中 `包名/Activity` 形式的 token（如 com.tencent.mm/.ui.LauncherUI）。
+pub fn parse_foreground_package(out: &str) -> Option<String> {
+    for line in out.lines() {
+        if !line.contains("ResumedActivity") {
+            continue;
+        }
+        for token in line.split_whitespace() {
+            if let Some(pos) = token.find('/') {
+                let pkg = &token[..pos];
+                let first = pkg.chars().next();
+                if pkg.contains('.') && first.is_some_and(|c| c.is_ascii_alphabetic()) {
+                    return Some(pkg.to_string());
+                }
+            }
+        }
+    }
+    None
+}
+
+/// 读取设备当前前台应用包名。
+pub fn foreground_package(adb: &std::path::Path, serial: &str) -> Result<String, String> {
+    let out = run_adb(
+        adb,
+        &["-s", serial, "shell", "dumpsys", "activity", "activities"],
+        Duration::from_secs(10),
+    )?;
+    parse_foreground_package(&out).ok_or_else(|| "未能识别手机当前前台应用".to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::parse_display_ids;
@@ -416,5 +446,24 @@ mod tests {
     #[test]
     fn parse_empty_output() {
         assert!(parse_display_ids("").is_empty());
+    }
+}
+
+#[cfg(test)]
+mod fg_tests {
+    use super::parse_foreground_package;
+
+    #[test]
+    fn parse_resumed_activity_line() {
+        let out = "  some noise\n  ResumedActivity: ActivityRecord{1234abcd u0 com.tencent.mm/.ui.LauncherUI t123}\n";
+        assert_eq!(
+            parse_foreground_package(out),
+            Some("com.tencent.mm".to_string())
+        );
+    }
+
+    #[test]
+    fn parse_returns_none_when_absent() {
+        assert!(parse_foreground_package("no resumed info here").is_none());
     }
 }
