@@ -89,9 +89,15 @@ impl Hub {
 }
 
 /// viewer 控制指令（JSON）→ scrcpy 协议字节。返回 None 表示指令无效。
+/// debug 指令只落日志（返回空字节，写线程 write_all 空内容无害）。
 fn encode_control(text: &str) -> Option<Vec<u8>> {
     let v: serde_json::Value = serde_json::from_str(text).ok()?;
     let kind = v.get("kind")?.as_str()?;
+    if kind == "debug" {
+        let msg = v.get("msg").and_then(|m| m.as_str()).unwrap_or("");
+        log::warn!("[mirror][viewer] {}", msg);
+        return Some(Vec::new());
+    }
     let pos = || -> Option<(i32, i32, u16, u16)> {
         Some((
             v.get("x")?.as_i64()? as i32,

@@ -527,10 +527,16 @@ function sendText(text) {
     if (/^[\x20-\x7e\n\r\t]*$/.test(chunk)) {
       sendControl({ kind: 'text', text: chunk })
     } else {
+      sendDebug(`sendText 中文入队: "${chunk.slice(0, 20)}"`)
       pasteQueue.value.push(chunk)
       if (pasteQueue.value.length === 1) processPasteQueue()
     }
   }
+}
+
+// viewer 侧关键事件 → relay 日志（排障埋点，经中继 WARN 落盘）
+function sendDebug(msg) {
+  sendControl({ kind: 'debug', msg })
 }
 
 // 粘贴队列：写剪贴板 → 等设备回显确认内容已落 → 注入 KEYCODE_PASTE
@@ -540,6 +546,7 @@ let pasteWatch = null
 function processPasteQueue() {
   if (!pasteQueue.value.length) return
   const chunk = pasteQueue.value[0]
+  sendDebug(`set-clipboard 发出: "${chunk.slice(0, 20)}"`)
   sendControl({ kind: 'set-clipboard', paste: false, sequence: Date.now(), text: chunk })
   if (pasteWatch) clearTimeout(pasteWatch)
   // 兜底：回显异常丢失时 3s 后强制粘贴（避免卡队）
@@ -550,6 +557,7 @@ function onClipboardEcho(text) {
   if (!pasteQueue.value.length) return false
   const chunk = pasteQueue.value[0]
   if (text && (text === chunk || text.endsWith(chunk))) {
+    sendDebug('回显确认匹配，触发 PASTE')
     if (pasteWatch) clearTimeout(pasteWatch)
     firePaste()
     return true
@@ -559,6 +567,7 @@ function onClipboardEcho(text) {
 
 function firePaste() {
   pasteQueue.value.shift()
+  sendDebug('KEYCODE_PASTE 注入')
   // KEYCODE_PASTE = 279
   sendControl({ kind: 'keycode', action: 0, keycode: 279, repeat: 0, metaState: 0 })
   setTimeout(() => sendControl({ kind: 'keycode', action: 1, keycode: 279, repeat: 0, metaState: 0 }), 40)
@@ -610,12 +619,15 @@ function onKeydown(e) {
 }
 
 function onCompositionEnd(e) {
+  sendDebug(`compositionend: "${e.data}"`)
   sendText(e.data)
   if (kbdRef.value) kbdRef.value.value = ''
 }
 
-function onKbdInput() {
-  // 输入框只作 IME 组合捕获面，内容即取即清
+function onKbdInput(e) {
+  // 输入框只作 IME 组合捕获面。组合过程中严禁清空 value（会打断 IME 组合，
+  // 导致 compositionend 不触发、中文丢失）；组合结束由 onCompositionEnd 清空。
+  if (e && (e.isComposing || (e.inputType && e.inputType.startsWith('insertComposition')))) return
   if (kbdRef.value) kbdRef.value.value = ''
 }
 
