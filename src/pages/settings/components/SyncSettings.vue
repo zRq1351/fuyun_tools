@@ -94,60 +94,100 @@
       <p>{{ $t('settings.sync.howToStep4') }}</p>
     </div>
 
-    <!-- 手机投屏入口 -->
+    <!-- 手机投屏 -->
     <div class="mirror-entry">
       <h4>手机投屏</h4>
       <p class="hint">
         将手机画面实时投屏到电脑，并支持鼠标点击、滑动等反向控制。
-        需要用 USB 数据线连接手机并授权调试（首次会推送投屏组件到手机）。
-        中文输入请先在投屏画面上点击手机输入框（键盘弹出后再打字）。
+        连接前需在手机上<b>开启开发者模式</b>：USB 投屏需打开「USB 调试」，WiFi 首次连接需「无线调试」（Android 11+）或先插线切换。
       </p>
-      <el-button
-        type="primary"
-        :loading="mirrorStarting"
-        @click="onStartMirror"
-      >
-        开启投屏
-      </el-button>
-    </div>
+      <el-collapse class="mirror-guide">
+        <el-collapse-item
+          title="首次使用？展开查看手机设置步骤"
+          name="guide"
+        >
+          <p>1. 手机「设置 → 关于手机」→ 连续点击「版本号」7 次，开启开发者模式</p>
+          <p>2. 进入「设置 → 系统 → 开发者选项」</p>
+          <p>3. USB 投屏：打开「USB 调试」，插上数据线，在手机弹窗中点「允许」</p>
+          <p>4. WiFi 投屏（Android 11+）：打开「无线调试」；或先插线用「USB 一键切换无线」</p>
+          <p>5. 中文输入：先在投屏画面上点击手机输入框，键盘弹出后再打字</p>
+        </el-collapse-item>
+      </el-collapse>
 
-    <!-- 无线投屏 -->
-    <div class="mirror-entry">
-      <h4>无线投屏</h4>
-      <p class="hint">
-        手机与电脑在同一 WiFi 下无线投屏，无需 USB 线（画面延迟略高于 USB）。
-        「USB 一键切换」需要先用数据线连接一次，之后即可拔线使用；
-        手机重启后无线模式失效，需重新插线切换。
-      </p>
-      <el-button
-        :loading="wirelessStarting"
-        @click="onEnableWireless"
-      >
-        USB 一键切换无线
-      </el-button>
-      <el-button
-        :loading="wirelessConnecting"
-        @click="onConnectWireless"
-      >
-        输入 IP 连接
-      </el-button>
+      <div class="mirror-modes">
+        <div class="mode-card">
+          <div class="mode-title">
+            USB 投屏
+            <el-tag
+              size="small"
+              type="success"
+            >
+              推荐
+            </el-tag>
+          </div>
+          <p class="mode-desc">
+            数据线连接，延迟低、画面稳定，不依赖 WiFi。
+          </p>
+          <el-button
+            type="primary"
+            :loading="mirrorStarting"
+            @click="onStartMirror"
+          >
+            开启 USB 投屏
+          </el-button>
+        </div>
+        <div class="mode-card">
+          <div class="mode-title">
+            WiFi 投屏
+          </div>
+          <p class="mode-desc">
+            手机与电脑在同一 WiFi 下连接，无需数据线（画面延迟略高于 USB）。
+            手机重启后无线模式失效，需重新插线切换或配对。
+          </p>
+          <div class="mode-actions">
+            <el-button
+              :loading="wirelessStarting"
+              @click="onEnableWireless"
+            >
+              USB 一键切换无线
+            </el-button>
+            <el-button
+              :loading="wirelessConnecting"
+              @click="onConnectWireless"
+            >
+              输入 IP 连接
+            </el-button>
+          </div>
+        </div>
+      </div>
 
       <!-- 历史设备：多台手机快速切换 -->
       <template v-if="deviceHistory.length">
         <div class="history-title">
           历史设备
+          <el-button
+            size="small"
+            text
+            class="history-refresh"
+            @click="refreshDeviceHistory"
+          >
+            刷新
+          </el-button>
         </div>
         <div
           v-for="d in deviceHistory"
           :key="d.serial"
           class="history-device"
         >
-          <span class="hd-name">{{ d.name }}</span>
+          <span
+            class="hd-name"
+            :title="d.serial"
+          >{{ d.name }}</span>
           <span
             class="hd-conn"
             :class="connLabel(d) === 'WiFi' ? 'is-wifi' : 'is-usb'"
           >{{ connLabel(d) }}</span>
-          <span class="hd-serial">{{ d.serial }}</span>
+          <span class="hd-time">{{ lastUsedLabel(d.lastUsedMs) }}</span>
           <span
             v-if="d.online"
             class="hd-online"
@@ -192,6 +232,17 @@ async function refreshDeviceHistory() {
 // 连接方式徽标：WiFi / USB（兼容旧记录的 wireless 字段）
 function connLabel(d) {
   return (d.connType === 'wireless' || d.wireless) ? 'WiFi' : 'USB'
+}
+
+// 最近使用时间（相对时间，如「5 分钟前」）
+function lastUsedLabel(ms) {
+  if (!ms) return ''
+  const min = Math.floor((Date.now() - ms) / 60000)
+  if (min < 1) return '刚刚'
+  if (min < 60) return `${min} 分钟前`
+  const h = Math.floor(min / 60)
+  if (h < 24) return `${h} 小时前`
+  return `${Math.floor(h / 24)} 天前`
 }
 
 // 历史设备一键重连：无线先 adb connect（幂等），再开启投屏
@@ -519,6 +570,67 @@ onUnmounted(() => {
   font-size: 12px;
   font-weight: 600;
   color: var(--el-text-color-secondary);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.history-refresh {
+  font-weight: 400;
+}
+
+/* 投屏模式卡片 */
+.mirror-guide {
+  margin: 10px 0;
+}
+
+.mirror-guide p {
+  margin: 4px 0;
+  font-size: 13px;
+  color: var(--el-text-color-regular);
+}
+
+.mirror-modes {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.mode-card {
+  flex: 1 1 240px;
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 10px;
+  padding: 14px 16px;
+  background: var(--fy-bg-card, transparent);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.mode-card .mode-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--el-text-color-primary);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.mode-card .mode-desc {
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+  line-height: 1.6;
+  flex: 1;
+}
+
+.mode-card .mode-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.mode-card .el-button {
+  align-self: flex-start;
 }
 
 .history-device {
@@ -537,10 +649,10 @@ onUnmounted(() => {
   color: var(--el-text-color-primary);
 }
 
-.history-device .hd-serial {
+/* 最近使用时间 */
+.history-device .hd-time {
   font-size: 12px;
   color: var(--el-text-color-secondary);
-  font-family: monospace;
 }
 
 /* 连接方式徽标 */
