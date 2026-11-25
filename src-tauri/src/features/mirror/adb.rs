@@ -236,6 +236,27 @@ pub fn enable_tcpip(adb: &std::path::Path, serial: &str) -> Result<(), String> {
     .map(|_| ())
 }
 
+/// 等待指定 serial 回到 device 状态。
+/// `adb tcpip` 会重启 adbd，设备会在 adb 列表中短暂离线或消失（数秒），必须等它回来。
+pub fn wait_for_device(
+    adb: &std::path::Path,
+    serial: &str,
+    timeout: Duration,
+) -> Result<(), String> {
+    let deadline = std::time::Instant::now() + timeout;
+    loop {
+        if let Ok(list) = list_device_serials(adb) {
+            if list.iter().any(|s| s == serial) {
+                return Ok(());
+            }
+        }
+        if std::time::Instant::now() >= deadline {
+            return Err(format!("设备 {} 未重新上线（等待超时）", serial));
+        }
+        std::thread::sleep(Duration::from_millis(500));
+    }
+}
+
 /// 读取设备 wlan0 的 IPv4 地址。
 pub fn get_wlan_ip(adb: &std::path::Path, serial: &str) -> Result<String, String> {
     let out = run_adb(

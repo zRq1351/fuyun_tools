@@ -92,7 +92,13 @@ pub async fn mirror_start(
     let app_for_session = app.clone();
     let serial_for_session = serial.clone();
     let handle = tauri::async_runtime::spawn_blocking(move || {
-        session::start(&app_for_session, hub_for_session, adb_path, jar, serial_for_session)
+        session::start(
+            &app_for_session,
+            hub_for_session,
+            adb_path,
+            jar,
+            serial_for_session,
+        )
     })
     .await
     .map_err(|e| format!("投屏任务失败: {}", e))??;
@@ -112,7 +118,9 @@ pub async fn mirror_start(
     let name_for_history = device_name.clone();
     let serial_for_history = session_serial.clone();
     let _ = tauri::async_runtime::spawn_blocking(move || {
-        if let Err(e) = record_device_history(&app_for_history, &name_for_history, &serial_for_history) {
+        if let Err(e) =
+            record_device_history(&app_for_history, &name_for_history, &serial_for_history)
+        {
             log::warn!("[mirror] 设备历史记录失败: {}", e);
         }
     });
@@ -148,7 +156,11 @@ struct HistoryDevice {
 impl HistoryDevice {
     /// 无线设备的 serial 形如 `ip:port`；USB 设备为硬件序列号。
     fn derive_conn_type(serial: &str) -> &'static str {
-        if serial.contains(':') { "wireless" } else { "usb" }
+        if serial.contains(':') {
+            "wireless"
+        } else {
+            "usb"
+        }
     }
 
     fn conn_type_or_derived(&self) -> &str {
@@ -170,8 +182,12 @@ fn history_file_path(app: &AppHandle) -> Result<std::path::PathBuf, String> {
 }
 
 fn load_history(app: &AppHandle) -> Vec<HistoryDevice> {
-    let Ok(path) = history_file_path(app) else { return Vec::new() };
-    let Ok(text) = std::fs::read_to_string(&path) else { return Vec::new() };
+    let Ok(path) = history_file_path(app) else {
+        return Vec::new();
+    };
+    let Ok(text) = std::fs::read_to_string(&path) else {
+        return Vec::new();
+    };
     serde_json::from_str(&text).unwrap_or_default()
 }
 
@@ -209,13 +225,14 @@ fn record_device_history(app: &AppHandle, name: &str, serial: &str) -> Result<()
 pub async fn mirror_device_history(app: AppHandle) -> Result<serde_json::Value, String> {
     let adb_path = adb::resolve_adb(Some(&app))?;
     let app2 = app.clone();
-    let (history, online) = tauri::async_runtime::spawn_blocking(move || -> (Vec<HistoryDevice>, Vec<String>) {
-        let h = load_history(&app2);
-        let online = adb::list_device_serials(&adb_path).unwrap_or_default();
-        (h, online)
-    })
-    .await
-    .map_err(|e| e.to_string())?;
+    let (history, online) =
+        tauri::async_runtime::spawn_blocking(move || -> (Vec<HistoryDevice>, Vec<String>) {
+            let h = load_history(&app2);
+            let online = adb::list_device_serials(&adb_path).unwrap_or_default();
+            (h, online)
+        })
+        .await
+        .map_err(|e| e.to_string())?;
     let items: Vec<serde_json::Value> = history
         .into_iter()
         .map(|d| {
@@ -292,9 +309,18 @@ pub async fn mirror_enable_wireless(app: AppHandle) -> Result<serde_json::Value,
     let s2 = serial.clone();
     let result = tauri::async_runtime::spawn_blocking(move || -> Result<String, String> {
         adb::enable_tcpip(&adb, &s2)?;
-        // tcpip 重启 adbd，等待几秒后读 IP
-        std::thread::sleep(Duration::from_secs(2));
-        let ip = adb::get_wlan_ip(&adb, &s2)?;
+        // tcpip 会重启 adbd：设备在 adb 列表中短暂离线/消失，等它回到 device 状态
+        adb::wait_for_device(&adb, &s2, Duration::from_secs(15))?;
+        // 刚上线时 adbd 可能仍在恢复期，读 IP 失败则重试
+        let mut ip: Result<String, String> = Err(String::new());
+        for _ in 0..5 {
+            ip = adb::get_wlan_ip(&adb, &s2);
+            if ip.is_ok() {
+                break;
+            }
+            std::thread::sleep(Duration::from_secs(1));
+        }
+        let ip = ip?;
         let address = format!("{}:5555", ip);
         // connect 可能需要多次尝试（adbd 重启中）
         let mut last_err = String::new();
