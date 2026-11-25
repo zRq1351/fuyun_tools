@@ -18,6 +18,12 @@ pub const MSG_INJECT_SCROLL_EVENT: u8 = 3;
 pub const MSG_BACK_OR_SCREEN_ON: u8 = 4;
 /// 设置剪贴板
 pub const MSG_SET_CLIPBOARD: u8 = 9;
+/// 设置屏幕电源模式（0=OFF 息屏，2=NORMAL 点亮）
+pub const MSG_SET_SCREEN_POWER_MODE: u8 = 10;
+/// 屏幕电源：关闭（息屏，投屏继续）
+pub const SCREEN_POWER_MODE_OFF: u8 = 0;
+/// 屏幕电源：正常
+pub const SCREEN_POWER_MODE_NORMAL: u8 = 2;
 /// 旋转设备屏幕
 pub const MSG_ROTATE_DEVICE: u8 = 11;
 
@@ -158,6 +164,11 @@ pub fn rotate_device() -> Vec<u8> {
     vec![MSG_ROTATE_DEVICE]
 }
 
+/// 设置设备屏幕电源模式（息屏投屏 = OFF，面板关闭但渲染与投屏继续）。
+pub fn set_screen_power(mode: u8) -> Vec<u8> {
+    vec![MSG_SET_SCREEN_POWER_MODE, mode]
+}
+
 /// 视频帧头（12 字节）解析结果。
 pub enum VideoHeader {
     /// session 重置（设备旋转/分辨率变化）：新宽高 + 是否客户端缩放触发
@@ -264,5 +275,13 @@ mod tests {
         assert_eq!(buf[0], MSG_INJECT_TEXT);
         assert_eq!(&buf[1..5], &2i32.to_be_bytes());
         assert_eq!(&buf[5..], b"hi");
+    }
+
+    #[test]
+    fn screen_power_message() {
+        let off = super::set_screen_power(super::SCREEN_POWER_MODE_OFF);
+        assert_eq!(off, vec![super::MSG_SET_SCREEN_POWER_MODE, 0]);
+        let normal = super::set_screen_power(super::SCREEN_POWER_MODE_NORMAL);
+        assert_eq!(normal, vec![super::MSG_SET_SCREEN_POWER_MODE, 2]);
     }
 }

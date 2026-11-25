@@ -808,6 +808,11 @@ pub async fn mirror_pull_files(
 /// 停止会话（供窗口销毁/退出时调用）。
 pub fn stop_session(app: &AppHandle) {
     if let Some(session) = state().session.lock().unwrap().take() {
+        // 兜底点亮手机屏幕：若用户开启了息屏投屏，直接杀进程会让手机一直黑屏
+        session.send_control(super::protocol::set_screen_power(
+            super::protocol::SCREEN_POWER_MODE_NORMAL,
+        ));
+        std::thread::sleep(Duration::from_millis(50));
         session.stop();
         log::info!("投屏会话已停止");
     }

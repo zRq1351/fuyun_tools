@@ -141,6 +141,16 @@ fn encode_control(text: &str) -> Option<Vec<u8>> {
             ))
         }
         "rotate" => Some(protocol::rotate_device()),
+        // 息屏投屏：on=false 关闭手机面板（渲染与投屏继续），on=true 点亮
+        "screen-power" => {
+            let on = v.get("on").and_then(|o| o.as_bool()).unwrap_or(true);
+            let mode = if on {
+                protocol::SCREEN_POWER_MODE_NORMAL
+            } else {
+                protocol::SCREEN_POWER_MODE_OFF
+            };
+            Some(protocol::set_screen_power(mode))
+        }
         _ => None,
     }
 }

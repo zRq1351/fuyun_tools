@@ -104,6 +104,26 @@
           </button>
           <button
             class="btn"
+            :class="{ active: screenOff }"
+            :disabled="!connected"
+            :title="screenOff ? '点亮手机屏幕' : '息屏投屏：关闭手机面板，投屏与控制继续'"
+            @click="toggleScreenOff"
+          >
+            <svg
+              v-if="!screenOff"
+              viewBox="0 0 24 24"
+            ><path d="M20 14.5A8.5 8.5 0 0 1 9.5 4a8.5 8.5 0 1 0 10.5 10.5z" /></svg>
+            <svg
+              v-else
+              viewBox="0 0 24 24"
+            ><circle
+              cx="12"
+              cy="12"
+              r="4"
+            /><path d="M12 2.5v2.5M12 19v2.5M2.5 12H5M19 12h2.5M5.2 5.2l1.8 1.8M17 17l1.8 1.8M18.8 5.2 17 7M7 17l-1.8 1.8" /></svg>
+          </button>
+          <button
+            class="btn"
             :disabled="!connected"
             title="导出手机最近文件/图片到电脑"
             @click="onExport"
@@ -770,6 +790,10 @@ async function confirmExport() {
 
 async function closeWindow() {
   stopped = true
+  // 息屏状态下关窗：先点亮屏幕（后端 stop_session 也有兜底）
+  if (screenOff.value) {
+    try { sendControl({kind: 'screen-power', on: true}) } catch { /* ignore */ }
+  }
   // 关窗即断开：后端监听窗口 Destroyed 会停止会话
   try { await getCurrentWindow().close() } catch { /* ignore */ }
 }
@@ -889,6 +913,8 @@ let lastRecoverAt = 0
 
 // ---- 独立投屏（应用模式）状态 ----
 const appMode = ref(null) // 当前会话投的应用包名（null = 整屏）
+// 息屏投屏：手机面板关闭，渲染与投屏继续
+const screenOff = ref(false)
 let currentSerial = null
 // 窗口自身发起会话切换期间为 true：抑制 stopped 广播触发的恢复与看门狗
 let externalSwitch = false
@@ -926,6 +952,15 @@ async function toggleAppMirror() {
   } catch (e) {
     showToast(`独立投屏失败：${String(e)}`, 4000)
   }
+}
+
+// 息屏开关：on=false 关闭手机面板（投屏继续），on=true 点亮
+function toggleScreenOff() {
+  if (!connected.value) return
+  const next = !screenOff.value
+  sendControl({kind: 'screen-power', on: !next})
+  screenOff.value = next
+  showToast(next ? '已息屏：手机面板关闭，投屏与控制继续' : '手机屏幕已点亮', 3000)
 }
 
 async function recoverSession() {
@@ -979,6 +1014,8 @@ function connectWebSocket(port) {
     errorMsg.value = ''
     statusText.value = '已连接'
     refocusKbd() // 为 IME 组合输入聚焦捕获框
+    // 会话重建（切换设备/独立投屏/自动恢复）后保持息屏状态
+    if (screenOff.value) sendControl({kind: 'screen-power', on: false})
   }
   ws.onmessage = (event) => {
     if (typeof event.data === 'string') {
