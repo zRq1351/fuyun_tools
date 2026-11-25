@@ -135,8 +135,14 @@ pub fn start(
         scid, MAX_SIZE, BIT_RATE, MAX_FPS
     );
     if app_package.is_some() {
-        // 虚拟显示器：尺寸默认同主屏（server 端 new_display=true 语义）
-        options.push_str(" new_display=true");
+        // 虚拟显示器：该 server 要求显式 <宽>x<高>（new_display=true 会崩），
+        // 取主屏分辨率与密度，wm 查询失败时用 720p 兜底
+        let opt = match adb::wm_display_metrics(&adb_path, &serial) {
+            Ok((w, h, dpi)) => format!("new_display={}x{}/{}", w, h, dpi),
+            Err(_) => "new_display=1280x720/240".to_string(),
+        };
+        log::info!("[mirror] 应用投屏虚拟显示器参数: {}", opt);
+        options.push_str(&format!(" {}", opt));
     }
     let child = adb::start_server(&adb_path, &serial, &options, server_log.as_ref())?;
     let child = Arc::new(Mutex::new(Some(child)));

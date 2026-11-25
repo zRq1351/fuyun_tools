@@ -431,6 +431,56 @@ pub fn foreground_package(adb: &std::path::Path, serial: &str) -> Result<String,
     parse_foreground_package(&out).ok_or_else(|| "未能识别手机当前前台应用".to_string())
 }
 
+/// 读取主屏分辨率与密度（应用投屏虚拟显示器尺寸用）。Override 值优先于 Physical。
+pub fn wm_display_metrics(adb: &std::path::Path, serial: &str) -> Result<(u32, u32, u32), String> {
+    let size_out = run_adb(
+        adb,
+        &["-s", serial, "shell", "wm", "size"],
+        Duration::from_secs(10),
+    )?;
+    let mut wh: Option<(u32, u32)> = None;
+    for line in size_out.lines() {
+        let t = line.trim();
+        let rest = if let Some(r) = t.strip_prefix("Override size: ") {
+            r
+        } else if let Some(r) = t.strip_prefix("Physical size: ") {
+            r
+        } else {
+            continue;
+        };
+        let mut it = rest.trim().split('x');
+        if let (Some(pw), Some(ph)) = (it.next(), it.next()) {
+            if let (Ok(w), Ok(h)) = (pw.trim().parse::<u32>(), ph.trim().parse::<u32>()) {
+                // 行序 Physical → Override，后写覆盖实现 Override 优先
+                wh = Some((w, h));
+            }
+        }
+    }
+    let density_out = run_adb(
+        adb,
+        &["-s", serial, "shell", "wm", "density"],
+        Duration::from_secs(10),
+    )?;
+    let mut dpi: Option<u32> = None;
+    for line in density_out.lines() {
+        let t = line.trim();
+        let rest = if let Some(r) = t.strip_prefix("Override density: ") {
+            r
+        } else if let Some(r) = t.strip_prefix("Physical density: ") {
+            r
+        } else {
+            continue;
+        };
+        if let Ok(v) = rest.trim().parse::<u32>() {
+            dpi = Some(v);
+        }
+    }
+    match (wh, dpi) {
+        (Some((w, h)), Some(dpi)) => Ok((w, h, dpi)),
+        _ => Err("wm size/density 输出无法解析".into()),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::parse_display_ids;
