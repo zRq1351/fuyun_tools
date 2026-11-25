@@ -67,6 +67,8 @@
           >
             <svg viewBox="0 0 24 24"><path d="M4.5 9a8 8 0 0 1 14.3-2.6M19.5 15a8 8 0 0 1-14.3 2.6M18.8 3.2v3.4h-3.4M5.2 20.8v-3.4h3.4" /></svg>
           </button>
+        </div>
+        <div class="seg">
           <button
             class="btn"
             :class="{ active: appMode }"
@@ -1223,6 +1225,8 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
+  row-gap: 6px;
   padding: 8px 14px;
   background: var(--panel);
   border-bottom: 1px solid var(--panel-border);
@@ -1278,6 +1282,8 @@ onUnmounted(() => {
 .actions {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
+  row-gap: 6px;
   gap: 8px;
 }
 
