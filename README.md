@@ -6,7 +6,7 @@
 
 **一套快捷键，重塑桌面效率**
 
-把剪贴板、AI 划词、截图 OCR、屏幕录制、应用启动与文档管理，收进同一套常驻系统托盘的工作流。
+把剪贴板、AI 划词、截图 OCR、屏幕录制、手机投屏、应用启动与文档管理，收进同一套常驻系统托盘的工作流。
 
 ![Version](https://img.shields.io/badge/version-0.8.53-blue?style=flat-square)
 ![Platform](https://img.shields.io/badge/platform-Windows_10%20%2F%2011-0078D6?style=flat-square&logo=windows)
@@ -25,12 +25,13 @@
 
 **fuyun_tools** 不是功能堆砌的工具箱，而是为 Windows 打造的**键盘优先效率中枢**：
 
-| 能力 | 快捷键 | 一句话 |
-|------|--------|--------|
+| 能力 | 入口 | 一句话 |
+|------|------|--------|
 | 文字剪贴板 | <kbd>Ctrl+Shift+Z</kbd> | 多层去重 · 分类置顶 · AI 解释翻译 |
 | 图片剪贴板 | <kbd>Ctrl+Shift+X</kbd> | 异步缩略图 · 配额保护 · 批量导入 |
 | 截图 OCR | <kbd>Ctrl+Shift+S</kbd> | 区域 / 长截图 · 专业标注 · 双引擎离线 OCR |
 | 屏幕录制 | <kbd>Alt+R</kbd> | WGC / WASAPI · 多显示器 · 悬浮胶囊 |
+| 手机投屏 | 设置开启 | USB / WiFi · 反向控制 · 独立投屏 · 息屏投屏 |
 | 应用启动 | <kbd>Alt+Q</kbd> | 全盘扫描 · 模糊搜索 · 自定义命令 |
 | 文档管理 | <kbd>Ctrl+Shift+D</kbd> | 索引 / 仓库双模式 · FTS5 · 标签治理 |
 
@@ -84,7 +85,38 @@
 - **控制**：悬浮胶囊折叠 / 展开；Push-to-Talk（<kbd>Ctrl+Space</kbd>）
 - **稳健**：黑屏看门狗 · Job Object 子进程回收 · 音频预校验 · AAC 回退
 
-### 5 · 启动器与文档中枢
+### 5 · 手机投屏
+
+基于 scrcpy 协议实现的安卓设备投屏（详见[第三方组件](#第三方组件)），画面经本地 USB 或局域网传输，**不经过任何服务器**。
+
+**连接方式**
+
+| 方式 | 说明 |
+|------|------|
+| USB | 插线即用，延迟最低（约 40–80ms） |
+| USB 一键切换无线 | 自动 `adb tcpip` + 读取手机 IP + 建立无线连接，拔线继续投 |
+| 手动 IP / 无线调试 | 手动输入 IP 连接；Android 11+ 支持配对码无线调试 |
+| 历史设备 | 多台手机一键重连，自动记忆 |
+
+**画质模式（设置页可切换）**
+
+| 档位 | 分辨率 | 帧率 | 码率 | 适用 |
+|------|--------|------|------|------|
+| 流畅 | 长边 1280 | 30fps | 6 Mbps | 弱网 / 省流量 |
+| 均衡（默认） | 长边 1600 | 30fps | 8 Mbps | 延迟与画质平衡 |
+| 高清 | 长边 1920 | 60fps | 16 Mbps | 高刷顺滑，USB 首选 |
+| 原生 | 手机原始分辨率 | 60fps | 24 Mbps | 接近手机原生体验 |
+
+**反向控制与投屏增强**
+
+- **反向控制**：鼠标点击 / 滑动 / 滚轮、键盘与中文输入（IME 组合输入支持）、剪贴板双向同步
+- **一键独立投屏**：工具栏一键将手机**当前前台应用**切入独立虚拟显示器——窗口里只看这个 App，手机物理屏幕可自由使用（Android 10+）
+- **息屏投屏**：一键关闭手机显示面板，渲染与投屏继续，省电不中断；停止投屏自动点亮
+- **滚轮翻页**：滚轮模拟触摸快滑手势，抖音 / 红果等短视频 App 直接吸附翻页；可随时切回平滑滚动
+- **文件互传**：拖拽文件到投屏窗口即推送到手机并触发媒体扫描；一键导出手机最近文件 / 图片
+- **会话韧性**：视频流 / 控制链路断开自动重建；USB 切无线、设备切换全程自动恢复，无需手动重连
+
+### 6 · 启动器与文档中枢
 
 - **启动器**：开始菜单全量扫描、PE 签名校验、内置命令闭环到各模块、分类网格与拖拽排序
 - **文档管理**：索引模式零搬迁 / 仓库模式集中托管；FTS5 全文检索；**多选批量打标**、标签全局改名合并删除、按标签筛选与摘要高亮、可重建索引；桌面小部件拖拽即用
@@ -113,6 +145,7 @@
 2. 托盘图标 → **设置**，启用需要的功能（默认全部关闭）
 3. 使用划词 / 剪贴板 AI 时，先在 **AI 设置** 中配置 OpenAI 兼容接口并「连接测试」
 4. 录屏首次启用会引导按需下载 FFmpeg（不打包进安装包，减小体积）
+5. 手机投屏在 **设置 → 手机同步** 中开启：USB 插线即可投；无线建议 Android 11+（配对），独立投屏需 Android 10+
 
 **系统要求**：Windows 10/11（64 位）· 建议 4GB+ 内存 · 500MB+ 磁盘
 
@@ -138,10 +171,11 @@ cd src-tauri && cargo check
 | 图像 | image · imageproc · OpenCV（可选长截图） |
 | 音视频 | WASAPI · WGC / DXGI · FFmpeg（按需） |
 | OCR | Windows Media OCR · PaddleOCR / MNN（离线） |
+| 手机投屏 | scrcpy-server v5.0.1（内嵌，未修改）· Android platform-tools adb |
 
 ```text
 fuyun_tools/
-├── src/           # Vue 3 前端（剪贴板 / 截图 / 录屏 / 启动器 / 文档…）
+├── src/           # Vue 3 前端（剪贴板 / 截图 / 录屏 / 投屏 / 启动器 / 文档…）
 ├── src-tauri/     # Rust 后端（features · services · ui · utils）
 └── docs/          # 许可证与第三方声明
 ```
@@ -153,7 +187,7 @@ fuyun_tools/
 | | |
 |--|--|
 | API Key | 本地 SQLite 加密，界面掩码 |
-| OCR / 录屏 / 数据 | **全本地**，零上传、零收集 |
+| OCR / 录屏 / 投屏 / 数据 | **全本地**，零上传、零收集；投屏画面仅经 USB 或局域网点对点传输 |
 | 源码 | **GPL-2.0** 开源可审计 |
 | 功能默认策略 | **默认关闭**，按需启用，避免无谓后台常驻 |
 
@@ -168,7 +202,7 @@ fuyun_tools/
 
 <details>
 <summary><b>为什么 Linux / macOS 没有划词？</b></summary>
-划词依赖 Windows 全局钩子（`WH_MOUSE_LL` / `WH_KEYBOARD_LL`），其他平台尚未移植。
+划词依赖 Windows 全局钩子（<code>WH_MOUSE_LL</code> / <code>WH_KEYBOARD_LL</code>），其他平台尚未移植。
 </details>
 
 <details>
@@ -182,19 +216,33 @@ fuyun_tools/
 </details>
 
 <details>
+<summary><b>投屏有哪些系统版本要求？</b></summary>
+USB / WiFi 基础投屏要求 Android 7+；「独立投屏」（虚拟显示器）要求 Android 10+；无线调试配对（免 USB 首连）要求 Android 11+。
+</details>
+
+<details>
+<summary><b>投屏画面会经过第三方服务器吗？</b></summary>
+不会。画面数据仅通过 USB 线或同一局域网点对点传输，应用不收集、不上传任何投屏内容。
+</details>
+
+<details>
 <summary><b>如何迁移数据？</b></summary>
-旧机「设置 → 备份与恢复 → 立即备份」导出 `.fytbk.zip`，新机恢复导入即可。
+旧机「设置 → 备份与恢复 → 立即备份」导出 <code>.fytbk.zip</code>，新机恢复导入即可。
 </details>
 
 ---
 
 ## 第三方组件
 
+本项目基于优秀的开源项目构建，感谢以下作者与社区：
+
+- **scrcpy**（Genymobile）— 手机投屏核心：内嵌其 **scrcpy-server v5.0.1**（未修改，按原样分发），投屏协议与设备端渲染均由其提供 · Apache License 2.0 · [项目主页](https://github.com/Genymobile/scrcpy)
+- **Android platform-tools（adb）** — 设备连接与调试通道，随安装包分发 · Apache License 2.0 · [AOSP](https://developer.android.com/tools/adb)
 - **FFmpeg** — 外部进程（GPL/LGPL），录屏启用时按需下载
 - **PaddleOCR / MNN** — Apache 2.0
 - **OpenCV** — 可选编译特性（Apache 2.0）
 
-详见 [`docs/THIRD_PARTY_NOTICES.md`](docs/THIRD_PARTY_NOTICES.md)
+许可证全文与分发合规说明见 [`docs/THIRD_PARTY_NOTICES.md`](docs/THIRD_PARTY_NOTICES.md)、[`docs/scrcpy_LICENSE`](docs/scrcpy_LICENSE)。
 
 ---
 

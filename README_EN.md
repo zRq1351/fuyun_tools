@@ -6,7 +6,7 @@
 
 **One Shortcut Away from Everything**
 
-A keyboard-first Windows productivity hub: clipboard, AI selection, screenshot OCR, screen recording, app launcher, and document management — always one shortcut deep.
+A keyboard-first Windows productivity hub: clipboard, AI selection, screenshot OCR, screen recording, phone mirroring, app launcher, and document management — always one shortcut deep.
 
 ![Version](https://img.shields.io/badge/version-0.8.53-blue?style=flat-square)
 ![Platform](https://img.shields.io/badge/platform-Windows_10%20%2F%2011-0078D6?style=flat-square&logo=windows)
@@ -25,12 +25,13 @@ A keyboard-first Windows productivity hub: clipboard, AI selection, screenshot O
 
 **fuyun_tools** is not a random toolbox — it is a **keyboard-driven efficiency core** for Windows:
 
-| Capability | Shortcut | In one line |
-|------------|----------|-------------|
+| Capability | Entry | In one line |
+|------------|-------|-------------|
 | Text Clipboard | <kbd>Ctrl+Shift+Z</kbd> | Multi-layer dedup · categories & pin · AI on items |
 | Image Clipboard | <kbd>Ctrl+Shift+X</kbd> | Async thumbs · disk quota · batch import |
 | Screenshot OCR | <kbd>Ctrl+Shift+S</kbd> | Region / long-shot · pro annotations · dual offline OCR |
 | Screen Recording | <kbd>Alt+R</kbd> | WGC / WASAPI · multi-monitor · floating capsule |
+| Phone Mirroring | Enable in Settings | USB / Wi-Fi · reverse control · per-app mirror · screen-off |
 | App Launcher | <kbd>Alt+Q</kbd> | Full scan · fuzzy search · custom commands |
 | Document Hub | <kbd>Ctrl+Shift+D</kbd> | Index / repo modes · FTS5 · tag governance |
 
@@ -84,7 +85,38 @@ Pipeline: **capture → annotate → long-shot → OCR → pin**
 - **Control**: collapsible capsule · Push-to-Talk (<kbd>Ctrl+Space</kbd>)
 - **Reliability**: black-frame watchdog · Job Object cleanup · audio pre-validation · AAC fallback
 
-### 5 · Launcher & document hub
+### 5 · Phone mirroring
+
+Android device mirroring built on the scrcpy protocol (see [Third-party](#third-party)). Frames travel over local USB or LAN only — **never through any server**.
+
+**Connections**
+
+| Mode | Description |
+|------|-------------|
+| USB | Plug and play, lowest latency (~40–80 ms) |
+| One-tap USB → Wi-Fi | Automatically runs `adb tcpip`, reads the phone's IP and establishes the wireless link; unplug and keep mirroring |
+| Manual IP / wireless debugging | Enter an IP manually; Android 11+ supports pairing-code wireless debugging |
+| Device history | One-tap reconnect for multiple phones |
+
+**Quality profiles (switchable in Settings)**
+
+| Profile | Resolution | FPS | Bitrate | Best for |
+|---------|-----------|-----|---------|----------|
+| Smooth | long edge 1280 | 30 | 6 Mbps | Weak networks / low traffic |
+| Balanced (default) | long edge 1600 | 30 | 8 Mbps | Latency/quality balance |
+| HD | long edge 1920 | 60 | 16 Mbps | High refresh, USB preferred |
+| Native | device native | 60 | 24 Mbps | Near-native experience |
+
+**Reverse control & mirroring enhancements**
+
+- **Reverse control**: mouse click / drag / wheel, keyboard with CJK IME support, two-way clipboard sync
+- **One-tap per-app mirroring**: move the phone's **current foreground app** into an isolated virtual display — watch it in the mirror window while the physical phone screen stays free (Android 10+)
+- **Screen-off mirroring**: turn off the phone's panel while rendering and mirroring continue; the screen wakes automatically when mirroring stops
+- **Wheel paging**: synthesize touch flings from wheel input so short-video apps (Douyin, Hongguo, …) snap to the next video; switch back to smooth scrolling anytime
+- **File transfer**: drop files onto the mirror window to push them to the phone (with media scan); one-tap export of recent phone files/images
+- **Session resilience**: automatic rebuild on stream/control loss; seamless recovery across USB→Wi-Fi switches and device changes
+
+### 6 · Launcher & document hub
 
 - **Launcher**: Start Menu sweep, PE verification, built-in commands into every module, category grid + drag sort
 - **Documents**: index (zero-move) vs repository (managed) · FTS5 · **multi-select batch tags**, global rename/merge/delete, tag filters, keyword snippets, rebuild index · desktop widget
@@ -113,6 +145,7 @@ Pipeline: **capture → annotate → long-shot → OCR → pin**
 2. Tray icon → **Settings**, enable the modules you need (all off by default)
 3. For AI selection / clipboard AI, configure an OpenAI-compatible provider under **AI Settings** and run **Test Connection**
 4. Recording asks you to download FFmpeg on first enable (not bundled)
+5. Phone mirroring lives under **Settings → Phone Sync**: USB works out of the box; wireless pairing prefers Android 11+; per-app mirroring needs Android 10+
 
 **Requirements**: Windows 10/11 (64-bit) · 4GB+ RAM · 500MB+ disk
 
@@ -137,11 +170,12 @@ cd src-tauri && cargo check
 | Imaging | image · imageproc · OpenCV (optional long-shot) |
 | AV | WASAPI · WGC / DXGI · FFmpeg (on demand) |
 | OCR | Windows Media OCR · PaddleOCR / MNN (offline) |
+| Phone mirroring | scrcpy-server v5.0.1 (embedded, unmodified) · Android platform-tools adb |
 
 ```text
 fuyun_tools/
-├── src/           # Vue 3 frontend
-├── src-tauri/     # Rust backend
+├── src/           # Vue 3 frontend (clipboard / screenshot / recording / mirroring / launcher / docs …)
+├── src-tauri/     # Rust backend (features · services · ui · utils)
 └── docs/          # Licenses & notices
 ```
 
@@ -152,7 +186,7 @@ fuyun_tools/
 | | |
 |--|--|
 | API keys | Encrypted local SQLite, masked UI |
-| OCR / recording / data | **Local only** — no upload, no telemetry |
+| OCR / recording / mirroring / data | **Local only** — no upload, no telemetry; mirrored frames travel over USB or LAN point-to-point |
 | Source | **GPL-2.0**, auditable |
 | Defaults | Features **off** until you enable them |
 
@@ -167,7 +201,7 @@ Enable the feature in Settings first, then check for conflicts. Failed registrat
 
 <details>
 <summary><b>Why no AI selection on Linux/macOS?</b></summary>
-The pipeline depends on Windows global hooks (`WH_MOUSE_LL` / `WH_KEYBOARD_LL`).
+The pipeline depends on Windows global hooks (<code>WH_MOUSE_LL</code> / <code>WH_KEYBOARD_LL</code>).
 </details>
 
 <details>
@@ -181,6 +215,16 @@ Yes — encrypted in local SQLite provider config, never plaintext in settings f
 </details>
 
 <details>
+<summary><b>Android requirements for mirroring?</b></summary>
+Basic USB / Wi-Fi mirroring: Android 7+. Per-app mirroring (virtual display): Android 10+. Wireless-debugging pairing (first connection without USB): Android 11+.
+</details>
+
+<details>
+<summary><b>Do mirrored frames go through a third-party server?</b></summary>
+No. Frames travel over the USB cable or your local network point-to-point. The app never collects or uploads mirroring content.
+</details>
+
+<details>
 <summary><b>Migrate to another PC?</b></summary>
 Export `.fytbk.zip` via Backup on the old machine, Restore on the new one.
 </details>
@@ -189,11 +233,15 @@ Export `.fytbk.zip` via Backup on the old machine, Restore on the new one.
 
 ## Third-party
 
+Built on great open-source projects — thanks to their authors and communities:
+
+- **scrcpy** (Genymobile) — the core of phone mirroring: embeds **scrcpy-server v5.0.1** (unmodified, distributed as-is), which provides the mirroring protocol and on-device rendering · Apache License 2.0 · [Project](https://github.com/Genymobile/scrcpy)
+- **Android platform-tools (adb)** — device connection and debugging channel, bundled with the installer · Apache License 2.0 · [AOSP](https://developer.android.com/tools/adb)
 - **FFmpeg** — external process (GPL/LGPL), on-demand for recording
 - **PaddleOCR / MNN** — Apache 2.0
 - **OpenCV** — optional compile feature (Apache 2.0)
 
-See [`docs/THIRD_PARTY_NOTICES.md`](docs/THIRD_PARTY_NOTICES.md)
+Full license texts and distribution-compliance notes: [`docs/THIRD_PARTY_NOTICES.md`](docs/THIRD_PARTY_NOTICES.md) · [`docs/scrcpy_LICENSE`](docs/scrcpy_LICENSE)
 
 ---
 
