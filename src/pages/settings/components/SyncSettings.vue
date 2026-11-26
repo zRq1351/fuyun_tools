@@ -1,9 +1,32 @@
 <template>
   <div class="sync-section">
-    <h3>{{ $t('settings.sync.title') }}</h3>
+    <!-- 手机功能总开关：与其它功能区保持一致的启用/停用开关 -->
+    <div class="module-toggle">
+      <div class="module-toggle-text">
+        <h4>{{ $t('settings.sync.moduleTitle') }}</h4>
+        <p>{{ $t('settings.sync.moduleHint') }}</p>
+      </div>
+      <el-switch
+        :model-value="form.phoneEnabled"
+        :loading="!!pendingToggles.phoneEnabled"
+        :active-text="pendingToggles.phoneEnabled === 'enabling' ? $t('common.enabling') : $t('common.enable')"
+        :inactive-text="pendingToggles.phoneEnabled === 'disabling' ? $t('common.disabling') : $t('common.disable')"
+        @update:model-value="(val) => toggleFeature('phoneEnabled', val)"
+      />
+    </div>
+
+    <div
+      v-if="!form.phoneEnabled"
+      class="module-off"
+    >
+      {{ $t('settings.sync.moduleDisabledHint') }}
+    </div>
 
     <!-- 手机连接状态总览：App（同步）与 ADB（投屏）两条通道一屏看清 -->
-    <div class="link-status">
+    <div
+      v-if="form.phoneEnabled"
+      class="link-status"
+    >
       <div class="ls-item">
         <span class="ls-label">手机 App（剪贴板同步）</span>
         <el-tag
@@ -32,239 +55,246 @@
       </el-button>
     </div>
 
-    <!-- 开关 -->
-    <div class="sync-toggle-row">
-      <div class="sync-toggle-text">
-        <p>{{ $t('settings.sync.enableHint') }}</p>
+    <template v-if="form.phoneEnabled">
+      <!-- 剪贴板同步 -->
+      <div class="sub-title">
+        {{ $t('settings.sync.syncTitle') }}
       </div>
-      <el-switch
-        v-model="enabled"
-        :loading="switching"
-        :active-text="$t('settings.sync.enable')"
-        @change="onToggle"
-      />
-    </div>
 
-    <template v-if="status.running">
-      <!-- 状态信息 -->
-      <el-descriptions
-        :column="2"
-        border
-        class="sync-status-card"
-      >
-        <el-descriptions-item :label="$t('settings.sync.pcName')">
-          {{ status.pcName }}
-        </el-descriptions-item>
-        <el-descriptions-item :label="$t('settings.sync.port')">
-          {{ status.port }}
-        </el-descriptions-item>
-      </el-descriptions>
-
-      <!-- 配对码 -->
-      <div class="pairing-block">
-        <div class="pairing-code">
-          {{ status.pairingCode || '------' }}
+      <!-- 开关 -->
+      <div class="sync-toggle-row">
+        <div class="sync-toggle-text">
+          <p>{{ $t('settings.sync.enableHint') }}</p>
         </div>
-        <div class="pairing-meta">
-          <span v-if="status.pairingCode && status.pairingExpiresInSecs > 0">
-            {{ $t('settings.sync.expiresIn', {secs: status.pairingExpiresInSecs}) }}
-          </span>
-          <span v-else>{{ $t('settings.sync.codeExpired') }}</span>
-          <el-button
-            size="small"
-            @click="onRegenerate"
-          >
-            {{ $t('settings.sync.regenerate') }}
-          </el-button>
-        </div>
-        <p class="hint">
-          {{ $t('settings.sync.pairingCodeHint') }}
-        </p>
+        <el-switch
+          v-model="enabled"
+          :loading="switching"
+          :active-text="$t('settings.sync.enable')"
+          @change="onToggle"
+        />
       </div>
 
-      <!-- 手动连接地址 -->
-      <div
-        v-if="address"
-        class="address-row"
-      >
-        <span>{{ $t('settings.sync.address') }}：<code>{{ address }}</code></span>
-        <el-button
-          size="small"
-          @click="copyAddress"
+      <template v-if="status.running">
+        <!-- 状态信息 -->
+        <el-descriptions
+          :column="2"
+          border
+          class="sync-status-card"
         >
-          {{ $t('settings.sync.copyAddress') }}
-        </el-button>
-      </div>
+          <el-descriptions-item :label="$t('settings.sync.pcName')">
+            {{ status.pcName }}
+          </el-descriptions-item>
+          <el-descriptions-item :label="$t('settings.sync.port')">
+            {{ status.port }}
+          </el-descriptions-item>
+        </el-descriptions>
 
-      <!-- 已配对设备 -->
-      <div
-        v-if="status.paired"
-        class="paired-row"
-      >
-        <el-tag type="success">
-          {{ $t('settings.sync.paired') }}
-        </el-tag>
-        <el-button
-          size="small"
-          type="danger"
-          @click="onUnpair"
-        >
-          {{ $t('settings.sync.unpair') }}
-        </el-button>
-        <span class="hint">{{ $t('settings.sync.unpairHint') }}</span>
-      </div>
-    </template>
-
-    <!-- 使用说明 -->
-    <div class="how-to">
-      <h4>{{ $t('settings.sync.howToTitle') }}</h4>
-      <p>{{ $t('settings.sync.howToStep1') }}</p>
-      <p>{{ $t('settings.sync.howToStep2') }}</p>
-      <p>{{ $t('settings.sync.howToStep3') }}</p>
-      <p>{{ $t('settings.sync.howToStep4') }}</p>
-    </div>
-
-    <!-- 手机投屏 -->
-    <div class="mirror-entry">
-      <h4>手机投屏</h4>
-      <p class="hint">
-        将手机画面实时投屏到电脑，并支持鼠标点击、滑动等反向控制。
-        连接前需在手机上<b>开启开发者模式</b>：USB 投屏需打开「USB 调试」，WiFi 首次连接需「无线调试」（Android 11+）或先插线切换。
-      </p>
-      <el-collapse class="mirror-guide">
-        <el-collapse-item
-          title="首次使用？展开查看手机设置步骤"
-          name="guide"
-        >
-          <p>1. 手机「设置 → 关于手机」→ 连续点击「版本号」7 次，开启开发者模式</p>
-          <p>2. 进入「设置 → 系统 → 开发者选项」</p>
-          <p>3. USB 投屏：打开「USB 调试」，插上数据线，在手机弹窗中点「允许」</p>
-          <p>4. WiFi 投屏（Android 11+）：打开「无线调试」；或先插线用「USB 一键切换无线」</p>
-          <p>5. 中文输入：先在投屏画面上点击手机输入框，键盘弹出后再打字</p>
-        </el-collapse-item>
-      </el-collapse>
-
-      <div class="mirror-modes">
-        <div class="mode-card">
-          <div class="mode-title">
-            USB 投屏
-            <el-tag
+        <!-- 配对码 -->
+        <div class="pairing-block">
+          <div class="pairing-code">
+            {{ status.pairingCode || '------' }}
+          </div>
+          <div class="pairing-meta">
+            <span v-if="status.pairingCode && status.pairingExpiresInSecs > 0">
+              {{ $t('settings.sync.expiresIn', {secs: status.pairingExpiresInSecs}) }}
+            </span>
+            <span v-else>{{ $t('settings.sync.codeExpired') }}</span>
+            <el-button
               size="small"
-              type="success"
+              @click="onRegenerate"
             >
-              推荐
-            </el-tag>
-          </div>
-          <p class="mode-desc">
-            数据线连接，延迟低、画面稳定，不依赖 WiFi。
-          </p>
-          <el-button
-            type="primary"
-            :loading="mirrorStarting"
-            @click="onStartMirror"
-          >
-            开启 USB 投屏
-          </el-button>
-        </div>
-        <div class="mode-card">
-          <div class="mode-title">
-            WiFi 投屏
-          </div>
-          <p class="mode-desc">
-            手机与电脑在同一 WiFi 下连接，无需数据线（画面延迟略高于 USB）。
-            手机重启后无线模式失效，需重新插线切换或配对。
-          </p>
-          <div class="mode-actions">
-            <el-button
-              :loading="wirelessStarting"
-              @click="onEnableWireless"
-            >
-              USB 一键切换无线
-            </el-button>
-            <el-button
-              :loading="wirelessConnecting"
-              @click="onConnectWireless"
-            >
-              输入 IP 连接
+              {{ $t('settings.sync.regenerate') }}
             </el-button>
           </div>
+          <p class="hint">
+            {{ $t('settings.sync.pairingCodeHint') }}
+          </p>
         </div>
-      </div>
 
-      <!-- 画质模式 -->
-      <div class="quality-block">
-        <div class="mode-title">
-          画质模式
-        </div>
-        <p class="mode-desc">
-          影响清晰度、流畅度与延迟；切换后下次开启投屏生效（USB 带宽充裕，可选更高档位）。
-        </p>
-        <div class="quality-row">
-          <el-radio-group
-            v-model="qualityMode"
-            size="small"
-            @change="onQualityChange"
-          >
-            <el-radio-button value="smooth">
-              流畅
-            </el-radio-button>
-            <el-radio-button value="balanced">
-              均衡
-            </el-radio-button>
-            <el-radio-button value="hd">
-              高清 60fps
-            </el-radio-button>
-            <el-radio-button value="native">
-              原生
-            </el-radio-button>
-          </el-radio-group>
-          <span class="quality-hint">{{ qualityHint }}</span>
-        </div>
-      </div>
-
-      <!-- 历史设备：多台手机快速切换 -->
-      <template v-if="deviceHistory.length">
-        <div class="history-title">
-          历史设备
-          <el-button
-            size="small"
-            text
-            class="history-refresh"
-            @click="refreshDeviceHistory"
-          >
-            刷新
-          </el-button>
-        </div>
+        <!-- 手动连接地址 -->
         <div
-          v-for="d in deviceHistory"
-          :key="d.serial"
-          class="history-device"
+          v-if="address"
+          class="address-row"
         >
-          <span
-            class="hd-name"
-            :title="d.serial"
-          >{{ d.name }}</span>
-          <span
-            class="hd-conn"
-            :class="connLabel(d) === 'WiFi' ? 'is-wifi' : 'is-usb'"
-          >{{ connLabel(d) }}</span>
-          <span class="hd-time">{{ lastUsedLabel(d.lastUsedMs) }}</span>
-          <span
-            v-if="d.online"
-            class="hd-online"
-          >在线</span>
+          <span>{{ $t('settings.sync.address') }}：<code>{{ address }}</code></span>
           <el-button
             size="small"
-            type="primary"
-            plain
-            :loading="reconnecting === d.serial"
-            @click="onReconnectDevice(d)"
+            @click="copyAddress"
           >
-            连接并投屏
+            {{ $t('settings.sync.copyAddress') }}
           </el-button>
+        </div>
+
+        <!-- 已配对设备 -->
+        <div
+          v-if="status.paired"
+          class="paired-row"
+        >
+          <el-tag type="success">
+            {{ $t('settings.sync.paired') }}
+          </el-tag>
+          <el-button
+            size="small"
+            type="danger"
+            @click="onUnpair"
+          >
+            {{ $t('settings.sync.unpair') }}
+          </el-button>
+          <span class="hint">{{ $t('settings.sync.unpairHint') }}</span>
         </div>
       </template>
-    </div>
+
+      <!-- 使用说明 -->
+      <div class="how-to">
+        <h4>{{ $t('settings.sync.howToTitle') }}</h4>
+        <p>{{ $t('settings.sync.howToStep1') }}</p>
+        <p>{{ $t('settings.sync.howToStep2') }}</p>
+        <p>{{ $t('settings.sync.howToStep3') }}</p>
+        <p>{{ $t('settings.sync.howToStep4') }}</p>
+      </div>
+
+      <!-- 手机投屏 -->
+      <div class="mirror-entry">
+        <h4>{{ $t('settings.sync.mirrorTitle') }}</h4>
+        <p class="hint">
+          将手机画面实时投屏到电脑，并支持鼠标点击、滑动等反向控制。
+          连接前需在手机上<b>开启开发者模式</b>：USB 投屏需打开「USB 调试」，WiFi 首次连接需「无线调试」（Android 11+）或先插线切换。
+        </p>
+        <el-collapse class="mirror-guide">
+          <el-collapse-item
+            title="首次使用？展开查看手机设置步骤"
+            name="guide"
+          >
+            <p>1. 手机「设置 → 关于手机」→ 连续点击「版本号」7 次，开启开发者模式</p>
+            <p>2. 进入「设置 → 系统 → 开发者选项」</p>
+            <p>3. USB 投屏：打开「USB 调试」，插上数据线，在手机弹窗中点「允许」</p>
+            <p>4. WiFi 投屏（Android 11+）：打开「无线调试」；或先插线用「USB 一键切换无线」</p>
+            <p>5. 中文输入：先在投屏画面上点击手机输入框，键盘弹出后再打字</p>
+          </el-collapse-item>
+        </el-collapse>
+
+        <div class="mirror-modes">
+          <div class="mode-card">
+            <div class="mode-title">
+              USB 投屏
+              <el-tag
+                size="small"
+                type="success"
+              >
+                推荐
+              </el-tag>
+            </div>
+            <p class="mode-desc">
+              数据线连接，延迟低、画面稳定，不依赖 WiFi。
+            </p>
+            <el-button
+              type="primary"
+              :loading="mirrorStarting"
+              @click="onStartMirror"
+            >
+              开启 USB 投屏
+            </el-button>
+          </div>
+          <div class="mode-card">
+            <div class="mode-title">
+              WiFi 投屏
+            </div>
+            <p class="mode-desc">
+              手机与电脑在同一 WiFi 下连接，无需数据线（画面延迟略高于 USB）。
+              手机重启后无线模式失效，需重新插线切换或配对。
+            </p>
+            <div class="mode-actions">
+              <el-button
+                :loading="wirelessStarting"
+                @click="onEnableWireless"
+              >
+                USB 一键切换无线
+              </el-button>
+              <el-button
+                :loading="wirelessConnecting"
+                @click="onConnectWireless"
+              >
+                输入 IP 连接
+              </el-button>
+            </div>
+          </div>
+        </div>
+
+        <!-- 画质模式 -->
+        <div class="quality-block">
+          <div class="mode-title">
+            画质模式
+          </div>
+          <p class="mode-desc">
+            影响清晰度、流畅度与延迟；切换后下次开启投屏生效（USB 带宽充裕，可选更高档位）。
+          </p>
+          <div class="quality-row">
+            <el-radio-group
+              v-model="qualityMode"
+              size="small"
+              @change="onQualityChange"
+            >
+              <el-radio-button value="smooth">
+                流畅
+              </el-radio-button>
+              <el-radio-button value="balanced">
+                均衡
+              </el-radio-button>
+              <el-radio-button value="hd">
+                高清 60fps
+              </el-radio-button>
+              <el-radio-button value="native">
+                原生
+              </el-radio-button>
+            </el-radio-group>
+            <span class="quality-hint">{{ qualityHint }}</span>
+          </div>
+        </div>
+
+        <!-- 历史设备：多台手机快速切换 -->
+        <template v-if="deviceHistory.length">
+          <div class="history-title">
+            历史设备
+            <el-button
+              size="small"
+              text
+              class="history-refresh"
+              @click="refreshDeviceHistory"
+            >
+              刷新
+            </el-button>
+          </div>
+          <div
+            v-for="d in deviceHistory"
+            :key="d.serial"
+            class="history-device"
+          >
+            <span
+              class="hd-name"
+              :title="d.serial"
+            >{{ d.name }}</span>
+            <span
+              class="hd-conn"
+              :class="connLabel(d) === 'WiFi' ? 'is-wifi' : 'is-usb'"
+            >{{ connLabel(d) }}</span>
+            <span class="hd-time">{{ lastUsedLabel(d.lastUsedMs) }}</span>
+            <span
+              v-if="d.online"
+              class="hd-online"
+            >在线</span>
+            <el-button
+              size="small"
+              type="primary"
+              plain
+              :loading="reconnecting === d.serial"
+              @click="onReconnectDevice(d)"
+            >
+              连接并投屏
+            </el-button>
+          </div>
+        </template>
+      </div>
+    </template>
   </div>
 </template>
 
@@ -276,6 +306,30 @@ import {SyncService, MirrorService} from '../../../services/ipc'
 import {parseErrorMessage} from '../../../utils/errorHandler'
 
 const {t} = useI18n()
+
+const props = defineProps({
+  form: {type: Object, required: true},
+  onFeatureToggle: {type: Function, default: null},
+})
+// 总开关的启用/停用中间态（与其它功能设置页一致的交互反馈）
+const pendingToggles = ref({})
+
+const toggleFeature = async (fieldName, value) => {
+  if (pendingToggles.value[fieldName]) return
+  if (!props.onFeatureToggle) {
+    props.form[fieldName] = value
+    return
+  }
+  pendingToggles.value = {...pendingToggles.value, [fieldName]: value ? 'enabling' : 'disabling'}
+  await props.onFeatureToggle(fieldName, value)
+  pendingToggles.value = {...pendingToggles.value, [fieldName]: undefined}
+  // 关闭后同步服务已被后端停止，刷新页面状态显示
+  if (fieldName === 'phoneEnabled') {
+    await refreshStatus()
+    refreshLinkStatus()
+  }
+}
+
 const mirrorStarting = ref(false)
 const wirelessStarting = ref(false)
 const wirelessConnecting = ref(false)
@@ -564,6 +618,53 @@ onUnmounted(() => {
 <style scoped>
 .sync-section h3 {
   margin-top: 0;
+}
+
+/* 手机功能总开关卡片（与其它功能区一致的顶级开关） */
+.module-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 16px;
+  margin-bottom: 12px;
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 10px;
+  background: var(--fy-bg-card, transparent);
+}
+
+.module-toggle-text h4 {
+  margin: 0 0 6px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--el-text-color-primary);
+}
+
+.module-toggle-text p {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--el-text-color-secondary);
+}
+
+.module-off {
+  padding: 28px 16px;
+  text-align: center;
+  font-size: 13px;
+  color: var(--el-text-color-secondary);
+  border: 1px dashed var(--el-border-color);
+  border-radius: 10px;
+}
+
+/* 分区小标题：剪贴板同步 / 手机投屏 */
+.sub-title {
+  margin: 4px 0 12px;
+  padding-left: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--el-text-color-primary);
+  border-left: 3px solid var(--el-color-primary);
+  line-height: 1.2;
 }
 
 .sync-toggle-row {

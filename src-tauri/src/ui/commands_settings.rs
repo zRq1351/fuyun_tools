@@ -101,6 +101,7 @@ pub async fn save_app_settings(
     doc_manager_hot_key: Option<String>,
     doc_manager_enabled: Option<bool>,
     doc_manager_widget_enabled: Option<bool>,
+    phone_enabled: Option<bool>,
     selection_enabled: Option<bool>,
     selection_modifier_key: Option<String>,
     selection_custom_prompts: Option<Vec<crate::utils::settings_model::CustomPrompt>>,
@@ -176,6 +177,16 @@ pub async fn save_app_settings(
     }
     if let Some(val) = doc_manager_enabled {
         settings.doc_manager_enabled = val;
+    }
+    if let Some(val) = phone_enabled {
+        let old = settings.phone_enabled;
+        settings.phone_enabled = val;
+        // 关闭手机功能总开关：同步服务随之停止；投屏会话由窗口关闭/服务关闭兜底
+        if !val && old {
+            if let Err(e) = crate::features::sync::commands::stop_sync(app.clone()) {
+                log::warn!("关闭手机功能时停止同步服务失败: {}", e);
+            }
+        }
     }
 
     if let Some(enabled) = doc_manager_enabled {

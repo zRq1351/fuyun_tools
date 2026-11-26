@@ -392,7 +392,12 @@
       "unpairConfirm": "确定要吊销当前已配对的设备吗？手机需要重新配对才能连接。",
       "confirmTitle": "提示",
       "expiresIn": "{secs} 秒后过期",
-      "codeExpired": "配对码已过期，请重新生成"
+      "codeExpired": "配对码已过期，请重新生成",
+      "moduleTitle": "手机功能",
+      "moduleHint": "开启后可使用剪贴板同步与手机投屏；关闭将停止同步服务，投屏入口一并隐藏。",
+      "moduleDisabledHint": "手机功能已关闭。打开上方开关即可使用剪贴板同步与手机投屏。",
+      "mirrorTitle": "手机投屏",
+      "syncTitle": "剪贴板同步"
     },
     "diagnostic": {
       "logging": "日志记录",
@@ -528,7 +533,8 @@
       "recordingEnabled": "录屏",
       "selectionEnabled": "划词",
       "launcherEnabled": "启动器",
-      "docManagerEnabled": "文档管理"
+      "docManagerEnabled": "文档管理",
+      "phoneEnabled": "手机同步与投屏"
     },
     "enablingFeature": "正在{action}{feature}..."
   },

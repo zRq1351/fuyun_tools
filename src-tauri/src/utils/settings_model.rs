@@ -74,6 +74,9 @@ pub struct AppSettingsData {
     pub doc_manager_enabled: bool,
     #[serde(default = "default_doc_manager_widget_enabled")]
     pub doc_manager_widget_enabled: bool,
+    /// 手机功能总开关（剪贴板同步 + 投屏）；默认开启以保留既有用户的使用状态
+    #[serde(default = "default_phone_enabled")]
+    pub phone_enabled: bool,
     #[serde(default = "default_recording_default_fps")]
     pub recording_default_fps: u32,
     #[serde(default = "default_recording_default_video_bitrate_kbps")]
@@ -183,6 +186,7 @@ impl Default for AppSettingsData {
             launcher_enabled: default_launcher_enabled(),
             doc_manager_hot_key: default_doc_manager_hot_key(),
             doc_manager_enabled: default_doc_manager_enabled(),
+            phone_enabled: default_phone_enabled(),
             doc_manager_widget_enabled: default_doc_manager_widget_enabled(),
             recording_default_fps: default_recording_default_fps(),
             recording_default_video_bitrate_kbps: default_recording_default_video_bitrate_kbps(),
@@ -286,6 +290,10 @@ fn default_doc_manager_hot_key() -> String {
 
 fn default_doc_manager_enabled() -> bool {
     false
+}
+
+fn default_phone_enabled() -> bool {
+    true
 }
 
 fn default_doc_manager_widget_enabled() -> bool {

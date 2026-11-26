@@ -153,7 +153,10 @@
             />
           </div>
           <div v-else-if="activeTab === 'sync'">
-            <SyncSettings />
+            <SyncSettings
+              :form="form"
+              :on-feature-toggle="handleFeatureToggle"
+            />
           </div>
 
           <div v-else-if="isDevMode && activeTab === 'developer'">
@@ -311,6 +314,7 @@ const form = reactive({
   docManagerEnabled: false,
   docManagerHotKey: 'Ctrl+Shift+D',
   docManagerWidgetEnabled: false,
+  phoneEnabled: true,
   loggingEnabled: true
 })
 
@@ -520,6 +524,7 @@ onMounted(async () => {
     form.launcherEnabled = settings.launcher_enabled !== false
     form.launcherHotKey = settings.launcher_hot_key || 'Alt+Q'
     form.docManagerEnabled = settings.doc_manager_enabled === true
+    form.phoneEnabled = settings.phone_enabled !== false
     form.docManagerHotKey = settings.doc_manager_hot_key || 'Ctrl+Shift+D'
     form.docManagerWidgetEnabled = settings.doc_manager_widget_enabled === true
     form.loggingEnabled = settings.logging_enabled !== false

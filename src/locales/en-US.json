@@ -392,7 +392,12 @@
       "unpairConfirm": "Revoke the currently paired device? The phone will need to pair again.",
       "confirmTitle": "Notice",
       "expiresIn": "Expires in {secs}s",
-      "codeExpired": "Pairing code expired, please regenerate"
+      "codeExpired": "Pairing code expired, please regenerate",
+      "moduleTitle": "Phone features",
+      "moduleHint": "Enable clipboard sync and phone mirroring. Turning it off stops the sync service and hides mirroring.",
+      "moduleDisabledHint": "Phone features are off. Turn the switch above on to use clipboard sync and phone mirroring.",
+      "mirrorTitle": "Phone mirroring",
+      "syncTitle": "Clipboard sync"
     },
     "diagnostic": {
       "logging": "Logging",
@@ -528,7 +533,8 @@
       "recordingEnabled": "Recording",
       "selectionEnabled": "Text Selection",
       "launcherEnabled": "Launcher",
-      "docManagerEnabled": "Document Manager"
+      "docManagerEnabled": "Document Manager",
+      "phoneEnabled": "Phone sync & mirroring"
     },
     "enablingFeature": "{action}ing {feature}..."
   },

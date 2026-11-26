@@ -100,6 +100,7 @@ export function useSettingsPersistence({
       docManagerEnabled: form.docManagerEnabled,
       docManagerHotKey: form.docManagerHotKey,
       docManagerWidgetEnabled: form.docManagerWidgetEnabled,
+      phoneEnabled: form.phoneEnabled,
       loggingEnabled: form.loggingEnabled
     })
 
@@ -254,6 +255,9 @@ export function useSettingsPersistence({
         }
         if (source.docManagerHotKey !== initial.docManagerHotKey) {
             changedFields.docManagerHotKey = source.docManagerHotKey
+        }
+        if (source.phoneEnabled !== initial.phoneEnabled) {
+            changedFields.phoneEnabled = source.phoneEnabled
         }
         if (source.docManagerWidgetEnabled !== initial.docManagerWidgetEnabled) {
             changedFields.docManagerWidgetEnabled = source.docManagerWidgetEnabled
@@ -544,6 +548,7 @@ export function useSettingsPersistence({
         selectionEnabled: t('settings.featureLabels.selectionEnabled'),
         launcherEnabled: t('settings.featureLabels.launcherEnabled'),
         docManagerEnabled: t('settings.featureLabels.docManagerEnabled'),
+        phoneEnabled: t('settings.featureLabels.phoneEnabled'),
     }))
 
     // 开关保存失败/取消时回退表单值：仅在值真正变化时设置抑制标志，
