@@ -503,6 +503,20 @@ pub async fn mirror_foreground_app(_app: AppHandle) -> Result<serde_json::Value,
     Ok(serde_json::json!({ "package": package, "serial": serial }))
 }
 
+/// 查询 adb 设备连接状态（设置页统一连接状态条）。
+#[tauri::command]
+pub async fn mirror_adb_status(app: AppHandle) -> Result<serde_json::Value, String> {
+    let adb_path = adb::resolve_adb(Some(&app))?;
+    let serials = tauri::async_runtime::spawn_blocking(move || adb::list_device_serials(&adb_path))
+        .await
+        .map_err(|e| e.to_string())??;
+    Ok(serde_json::json!({
+        "connected": !serials.is_empty(),
+        "serial": serials.first().cloned(),
+        "count": serials.len(),
+    }))
+}
+
 /// 列出第三方应用包名（应用投屏选择器）。优先取当前会话设备，否则取第一台已连设备。
 #[tauri::command]
 pub async fn mirror_list_apps(app: AppHandle) -> Result<serde_json::Value, String> {

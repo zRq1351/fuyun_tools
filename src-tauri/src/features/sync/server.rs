@@ -62,6 +62,9 @@ pub fn router(
         .route("/api/history", get(history))
         .route("/api/image", get(image_file))
         .route("/api/ws", get(ws_handler))
+        // 手机 App「投屏到电脑」远程入口（与剪贴板同步共用认证）
+        .route("/api/mirror/start", post(mirror_start_route))
+        .route("/api/mirror/status", get(mirror_status_route))
         .layer(axum::extract::DefaultBodyLimit::max(32 * 1024 * 1024))
         .layer(axum::middleware::from_fn_with_state(
             ServerState {
@@ -198,6 +201,45 @@ async fn push_clip(
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
     Ok(Json(serde_json::json!({ "ok": true })))
+}
+
+/// 手机 → PC：远程开启投屏（手机 App「投屏到电脑」入口，与剪贴板同步共用令牌认证）。
+/// 统一返回 200 + ok 标记，业务错误放 error 字段，方便手机端提示。
+async fn mirror_start_route(
+    State(s): State<ServerState>,
+    headers: HeaderMap,
+) -> Json<serde_json::Value> {
+    let token = request_token(&headers, None);
+    if check_token(&s.sync, &token).is_err() {
+        return Json(serde_json::json!({ "ok": false, "error": "认证失败，请重新配对" }));
+    }
+    log::info!("[sync] 手机远程请求开启投屏");
+    match crate::features::mirror::commands::mirror_start(s.app.clone(), None, None).await {
+        Ok(info) => Json(serde_json::json!({
+            "ok": true,
+            "deviceName": info.get("deviceName"),
+            "serial": info.get("serial"),
+        })),
+        Err(e) => {
+            log::warn!("[sync] 手机远程开启投屏失败: {}", e);
+            Json(serde_json::json!({ "ok": false, "error": e }))
+        }
+    }
+}
+
+/// 手机 → PC：查询投屏会话状态（App 主页展示用）。需令牌认证。
+async fn mirror_status_route(
+    State(s): State<ServerState>,
+    headers: HeaderMap,
+) -> Json<serde_json::Value> {
+    let token = request_token(&headers, None);
+    if check_token(&s.sync, &token).is_err() {
+        return Json(serde_json::json!({ "ok": false, "error": "认证失败，请重新配对" }));
+    }
+    match crate::features::mirror::commands::mirror_status(s.app.clone()).await {
+        Ok(v) => Json(v),
+        Err(e) => Json(serde_json::json!({ "ok": false, "error": e })),
+    }
 }
 
 /// 历史增量拉取（手机重连后补漏）

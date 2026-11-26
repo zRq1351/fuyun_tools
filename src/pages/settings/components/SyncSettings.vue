@@ -2,6 +2,36 @@
   <div class="sync-section">
     <h3>{{ $t('settings.sync.title') }}</h3>
 
+    <!-- 手机连接状态总览：App（同步）与 ADB（投屏）两条通道一屏看清 -->
+    <div class="link-status">
+      <div class="ls-item">
+        <span class="ls-label">手机 App（剪贴板同步）</span>
+        <el-tag
+          size="small"
+          :type="status.running ? (status.paired ? 'success' : 'primary') : 'info'"
+        >
+          {{ status.running ? (status.paired ? '运行中 · 已配对' : '运行中 · 待配对') : '已停止' }}
+        </el-tag>
+      </div>
+      <div class="ls-item">
+        <span class="ls-label">ADB 设备（投屏通道）</span>
+        <el-tag
+          size="small"
+          :type="adbStatus.connected ? 'success' : 'info'"
+        >
+          {{ adbStatus.connected ? `已连接 ${adbStatus.serial}` : '未连接' }}
+        </el-tag>
+      </div>
+      <el-button
+        size="small"
+        text
+        :loading="linkRefreshing"
+        @click="refreshLinkStatus"
+      >
+        刷新
+      </el-button>
+    </div>
+
     <!-- 开关 -->
     <div class="sync-toggle-row">
       <div class="sync-toggle-text">
@@ -196,12 +226,6 @@
       <div class="app-mirror">
         <div class="mode-title">
           应用投屏
-          <el-tag
-            size="small"
-            type="warning"
-          >
-            Beta
-          </el-tag>
         </div>
         <p class="mode-desc">
           选择一个 App 投到独立的投屏窗口（需 Android 10+），期间手机屏幕可自由使用其他应用。
@@ -299,6 +323,21 @@ const appPkg = ref('')
 const appsLoading = ref(false)
 const appStarting = ref(false)
 const qualityMode = ref('balanced')
+// 统一连接状态：ADB 设备（投屏通道）
+const adbStatus = ref({connected: false, serial: ''})
+const linkRefreshing = ref(false)
+
+async function refreshLinkStatus() {
+  linkRefreshing.value = true
+  try {
+    const r = await MirrorService.adbStatus()
+    adbStatus.value = {connected: !!r.connected, serial: r.serial || ''}
+  } catch {
+    adbStatus.value = {connected: false, serial: ''}
+  } finally {
+    linkRefreshing.value = false
+  }
+}
 
 const QUALITY_HINTS = {
   smooth: '长边 1280 · 30fps · 6Mbps — 省流量，适合弱网',
@@ -571,6 +610,7 @@ async function onUnpair() {
 onMounted(async () => {
     await refreshStatus()
     refreshDeviceHistory()
+    refreshLinkStatus()
     loadAppList()
     loadQuality()
     // 记住用户选择：开启过同步则随设置页自动恢复
@@ -833,6 +873,30 @@ onUnmounted(() => {
 
 .app-select {
   min-width: 220px;
+}
+
+/* 统一连接状态条 */
+.link-status {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 16px;
+  padding: 10px 14px;
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 8px;
+  background: var(--fy-bg-card, transparent);
+  margin-bottom: 12px;
+}
+
+.link-status .ls-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.link-status .ls-label {
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
 }
 
 .mode-card .el-button {
