@@ -1,8 +1,187 @@
 <template>
   <div
     class="mirror-page"
-    :class="[theme, { fullscreen: isFs }]"
+    :class="[theme, { fullscreen: isFs, 'bar-show': barShow }]"
+    @mousemove="onMouseMove"
   >
+    <div
+      class="toolbar"
+      data-tauri-drag-region
+    >
+      <div
+        class="toolbar-left"
+        data-tauri-drag-region
+      >
+        <span
+          class="status"
+          :class="{ connected: connected }"
+        >
+          <span class="dot" />
+          <span
+            v-if="!connected"
+            class="status-text"
+          >{{ statusText }}</span>
+        </span>
+      </div>
+      <div class="actions">
+        <div class="seg">
+          <button
+            class="btn"
+            :disabled="!connected"
+            title="返回"
+            @click="sendBack"
+          >
+            <svg viewBox="0 0 24 24"><path d="M15.5 4.5 8 12l7.5 7.5" /></svg>
+          </button>
+          <button
+            class="btn"
+            :disabled="!connected"
+            title="主页"
+            @click="sendHome"
+          >
+            <svg viewBox="0 0 24 24"><circle
+              cx="12"
+              cy="12"
+              r="7.5"
+            /></svg>
+          </button>
+          <button
+            class="btn"
+            :disabled="!connected"
+            title="最近任务"
+            @click="sendRecents"
+          >
+            <svg viewBox="0 0 24 24"><rect
+              x="5"
+              y="5"
+              width="14"
+              height="14"
+              rx="2.5"
+            /></svg>
+          </button>
+          <button
+            class="btn"
+            :disabled="!connected"
+            title="旋转屏幕"
+            @click="sendRotate"
+          >
+            <svg viewBox="0 0 24 24"><path d="M4.5 9a8 8 0 0 1 14.3-2.6M19.5 15a8 8 0 0 1-14.3 2.6M18.8 3.2v3.4h-3.4M5.2 20.8v-3.4h3.4" /></svg>
+          </button>
+        </div>
+        <div class="seg">
+          <button
+            class="btn"
+            :class="{ active: appMode }"
+            :disabled="!connected"
+            :title="appMode ? '退出独立投屏（回到整屏）' : '独立投屏：把手机当前应用投到独立窗口，手机可自由使用'"
+            @click="toggleAppMirror"
+          >
+            <svg
+              v-if="!appMode"
+              viewBox="0 0 24 24"
+            ><rect
+              x="3.5"
+              y="3.5"
+              width="17"
+              height="17"
+              rx="2"
+            /><rect
+              x="9"
+              y="9"
+              width="9"
+              height="9"
+              rx="1.5"
+              class="fill"
+            /></svg>
+            <svg
+              v-else
+              viewBox="0 0 24 24"
+            ><rect
+              x="3.5"
+              y="3.5"
+              width="17"
+              height="17"
+              rx="2"
+            /><path d="M9 12h6M12 9l3 3-3 3" /></svg>
+          </button>
+          <button
+            class="btn"
+            :class="{ active: wheelSwipeMode }"
+            :disabled="!connected"
+            :title="wheelSwipeMode ? '滚轮翻页已开启（滚轮=快速滑动，短视频直接翻页）；点击恢复平滑滚动' : '滚轮翻页：滚轮模拟快速滑动手势（看短视频用）'"
+            @click="toggleWheelSwipe"
+          >
+            <svg viewBox="0 0 24 24"><path d="M12 5v14M7.5 9.5 12 5l4.5 4.5M7.5 14.5 12 19l4.5-4.5" /></svg>
+          </button>
+          <button
+            class="btn"
+            :class="{ active: screenOff }"
+            :disabled="!connected"
+            :title="screenOff ? '点亮手机屏幕' : '息屏投屏：关闭手机面板，投屏与控制继续'"
+            @click="toggleScreenOff"
+          >
+            <svg
+              v-if="!screenOff"
+              viewBox="0 0 24 24"
+            ><path d="M20 14.5A8.5 8.5 0 0 1 9.5 4a8.5 8.5 0 1 0 10.5 10.5z" /></svg>
+            <svg
+              v-else
+              viewBox="0 0 24 24"
+            ><circle
+              cx="12"
+              cy="12"
+              r="4"
+            /><path d="M12 2.5v2.5M12 19v2.5M2.5 12H5M19 12h2.5M5.2 5.2l1.8 1.8M17 17l1.8 1.8M18.8 5.2 17 7M7 17l-1.8 1.8" /></svg>
+          </button>
+          <button
+            class="btn"
+            :disabled="!connected"
+            title="导出手机最近文件/图片到电脑"
+            @click="onExport"
+          >
+            <svg viewBox="0 0 24 24"><path d="M12 4v10M8 10.5 12 14.5l4-4M5 19h14" /></svg>
+          </button>
+        </div>
+        <div class="seg win">
+          <button
+            v-if="!isFs"
+            class="btn"
+            title="最小化"
+            @click="minimizeWindow"
+          >
+            <svg viewBox="0 0 24 24"><path d="M6 12h12" /></svg>
+          </button>
+          <button
+            class="btn"
+            :title="isFs ? '退出全屏' : '铺满屏幕'"
+            @click="toggleFullscreen"
+          >
+            <svg
+              v-if="!isFs"
+              viewBox="0 0 24 24"
+            ><rect
+              x="5.5"
+              y="5.5"
+              width="13"
+              height="13"
+              rx="1.5"
+            /></svg>
+            <svg
+              v-else
+              viewBox="0 0 24 24"
+            ><path d="M9.5 3.5v4a2 2 0 0 1-2 2h-4M14.5 20.5v-4a2 2 0 0 1 2-2h4M9.5 20.5v-4a2 2 0 0 0-2-2h-4M14.5 3.5v4a2 2 0 0 0 2 2h4" /></svg>
+          </button>
+          <button
+            class="btn close"
+            title="关闭投屏"
+            @click="closeWindow"
+          >
+            <svg viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18" /></svg>
+          </button>
+        </div>
+      </div>
+    </div>
+
     <div
       ref="stageRef"
       class="stage"
@@ -10,7 +189,6 @@
       <div
         class="device"
         :class="{ live: connected }"
-        data-tauri-drag-region
       >
         <canvas
           ref="canvasRef"
@@ -151,7 +329,6 @@
 <script setup>
 import { onMounted, onUnmounted, computed, ref } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
-import { emit, listen } from '@tauri-apps/api/event'
 import { IPC_COMMANDS } from '../../services/ipc'   
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { getCurrentWebview } from '@tauri-apps/api/webview'
@@ -171,6 +348,7 @@ const connected = ref(false)
 const errorMsg = ref('')
 const statusText = ref('未连接')
 const isFs = ref(false)
+const barShow = ref(true)
 const dragging = ref(false)
 const toastMsg = ref('')
 let toastTimer = null
@@ -649,28 +827,33 @@ async function toggleFullscreen() {
     } else {
       await win.setFullscreen(true)
     }
-    isFs.value = await win.isFullscreen()
-    emitState()
   } catch { /* ignore */ }
 }
 
-// ---- 窗口尺寸 = 画面显示尺寸 + 设备边框（18px） ----
-const DEVICE_CHROME = 18
+function onMouseMove(event) {
+  if (!isFs.value) {
+    barShow.value = true
+    return
+  }
+  barShow.value = event.clientY <= 48
+}
 
-async function syncWindowSize() {
-  if (!videoW || !videoH || isFs.value) return
+// ---- 窗口随视频方向横竖切换 ----
+async function syncWindowOrientation() {
+  if (!videoW || !videoH) return
+  const wantLandscape = videoW > videoH
   const win = getCurrentWindow()
   try {
     const size = await win.innerSize()
     const scale = await win.scaleFactor()
-    const curW = Math.round(size.width / scale)
-    const curH = Math.round(size.height / scale)
-    // 画面显示高 = 窗口高 - 设备边框；宽按视频宽高比推出
-    const dispH = Math.max(200, curH - DEVICE_CHROME)
-    const dispW = Math.round((dispH * videoW) / videoH)
-    const wantW = Math.max(288, dispW + DEVICE_CHROME)
-    if (Math.abs(curW - wantW) > 6) {
-      await win.setSize(new LogicalSize(wantW, curH))
+    const curW = size.width / scale
+    const curH = size.height / scale
+    const isLandscape = curW > curH
+    if (isLandscape !== wantLandscape) {
+      // 宽高互换，保持用户当前窗口大小比例
+      const w = Math.max(288, Math.round(curH))
+      const h = Math.max(288, Math.round(curW))
+      await win.setSize(new LogicalSize(w, h))
     }
   } catch { /* 窗口操作失败不影响画面 */ }
 }
@@ -690,7 +873,7 @@ function handleText(text) {
       const changed = videoW !== msg.width || videoH !== msg.height
       videoW = msg.width
       videoH = msg.height
-      if (changed) syncWindowSize()
+      if (changed) syncWindowOrientation()
       break
     }
     case 'stopped':
@@ -748,8 +931,6 @@ let lastRecoverAt = 0
 const appMode = ref(null) // 当前会话投的应用包名（null = 整屏）
 // 息屏投屏：手机面板关闭，渲染与投屏继续
 const screenOff = ref(false)
-// 滚轮翻页模式：滚轮事件转为触摸快滑（fling），短视频 App 直接吸附翻页
-const wheelSwipeMode = ref(localStorage.getItem('fuyun-mirror-wheel-swipe') === '1')
 let currentSerial = null
 // 窗口自身发起会话切换期间为 true：抑制 stopped 广播触发的恢复与看门狗
 let externalSwitch = false
@@ -764,7 +945,6 @@ async function switchSession(args) {
     const info = await invoke(IPC_COMMANDS.MIRROR_START, args)
     currentSerial = info.serial || null
     appMode.value = info.appPackage || null
-    emitState()
     connectWebSocket(info.relayPort)
     showToast(info.appPackage ? `独立投屏已开启：${info.appPackage}（手机可自由使用）` : '已回到整屏投屏', 3000)
   } catch (e) {
@@ -796,48 +976,17 @@ function toggleScreenOff() {
   const next = !screenOff.value
   sendControl({kind: 'screen-power', on: !next})
   screenOff.value = next
-  emitState()
   showToast(next ? '已息屏：手机面板关闭，投屏与控制继续' : '手机屏幕已点亮', 3000)
 }
 
+// 滚轮翻页模式：滚轮事件转为触摸快滑（fling），短视频 App 直接吸附翻页
+const wheelSwipeMode = ref(localStorage.getItem('fuyun-mirror-wheel-swipe') === '1')
 // 进行中的滚轮滑动动画（连续滚动时延长目标距离而不是叠加手势）
 let swipeGesture = null
-
-// ---- 控制条小窗口事件桥：主窗口是唯一状态源 ----
-let unlistenCmd = null
-
-function emitState() {
-  emit('mirror-state', {
-    connected: connected.value,
-    screenOff: screenOff.value,
-    wheelSwipeMode: wheelSwipeMode.value,
-    appMode: appMode.value,
-    isFs: isFs.value,
-  }).catch(() => {})
-}
-
-async function handleRemoteCmd(action) {
-  switch (action) {
-    case 'start-drag': await getCurrentWindow().startDragging(); break
-    case 'win-min': await minimizeWindow(); break
-    case 'win-fs': await toggleFullscreen(); break
-    case 'win-close': await closeWindow(); break
-    case 'nav-back': if (connected.value) sendBack(); break
-    case 'nav-home': if (connected.value) sendHome(); break
-    case 'nav-recents': if (connected.value) sendRecents(); break
-    case 'nav-rotate': if (connected.value) sendRotate(); break
-    case 'app-toggle': if (connected.value) await toggleAppMirror(); break
-    case 'screen-off': if (connected.value) toggleScreenOff(); break
-    case 'wheel-toggle': toggleWheelSwipe(); break
-    case 'export': if (connected.value) onExport(); break
-    case 'get-state': emitState(); break
-  }
-}
 
 function toggleWheelSwipe() {
   wheelSwipeMode.value = !wheelSwipeMode.value
   localStorage.setItem('fuyun-mirror-wheel-swipe', wheelSwipeMode.value ? '1' : '0')
-  emitState()
   showToast(wheelSwipeMode.value
     ? '滚轮翻页已开启：滚轮=快速滑动，短视频直接翻到下一个'
     : '滚轮翻页已关闭：滚轮恢复平滑滚动', 3000)
@@ -893,7 +1042,6 @@ async function recoverSession() {
     const info = await invoke(IPC_COMMANDS.MIRROR_START)
     currentSerial = info.serial || null
     appMode.value = info.appPackage || null
-    emitState()
     connectWebSocket(info.relayPort)
   } catch (e) {
     errorMsg.value = `自动恢复失败：${String(e)}（请手动停止后重新开启投屏）`
@@ -914,7 +1062,6 @@ async function watchdogTick() {
     const info = await invoke(IPC_COMMANDS.MIRROR_START)
     currentSerial = info.serial || null
     appMode.value = info.appPackage || null
-    emitState()
     connectWebSocket(info.relayPort)
   } catch { /* 会话未就绪（无设备/启动中），等下一轮 */ }
 }
@@ -929,7 +1076,6 @@ function connectWebSocket(port) {
     refocusKbd() // 为 IME 组合输入聚焦捕获框
     // 会话重建（切换设备/独立投屏/自动恢复）后保持息屏状态
     if (screenOff.value) sendControl({kind: 'screen-power', on: false})
-    emitState()
   }
   ws.onmessage = (event) => {
     if (typeof event.data === 'string') {
@@ -942,7 +1088,6 @@ function connectWebSocket(port) {
     connected.value = false
     if (!stopped) errorMsg.value = '与投屏服务的连接已断开'
     statusText.value = '未连接'
-    emitState()
   }
   ws.onerror = () => {}
 }
@@ -971,13 +1116,10 @@ onMounted(async () => {
   refocusKbd()
   window.addEventListener('focus', refocusKbd)
   watchdogTimer = setInterval(watchdogTick, 3000)
-  unlistenCmd = await listen('mirror-cmd', (e) => handleRemoteCmd(e.payload?.action))
-  emitState()
   try {
     const info = await invoke(IPC_COMMANDS.MIRROR_START)
     currentSerial = info.serial || null
     appMode.value = info.appPackage || null
-    emitState()
     connectWebSocket(info.relayPort)
   } catch (e) {
     stopped = true
@@ -988,7 +1130,6 @@ onMounted(async () => {
 
 onUnmounted(() => {
   stopped = true
-  if (unlistenCmd) { unlistenCmd(); unlistenCmd = null }
   if (watchdogTimer) { clearInterval(watchdogTimer); watchdogTimer = null }
   if (swipeGesture) { clearInterval(swipeGesture.timer); swipeGesture = null }
   if (unlistenResize) { unlistenResize(); unlistenResize = null }
@@ -1074,7 +1215,6 @@ onUnmounted(() => {
   height: 100vh;
   display: flex;
   flex-direction: column;
-  position: relative;
   background: radial-gradient(ellipse at 50% -20%, var(--bg-hi) 0%, var(--bg) 60%);
   color: var(--text);
   font-family: 'Segoe UI', 'Microsoft YaHei', sans-serif;
@@ -1238,56 +1378,6 @@ onUnmounted(() => {
   cursor: default;
 }
 
-/* 悬浮功能面板：默认收起为悬浮球，点击展开（右上=窗口控制，右下=投屏功能） */
-.float-panel {
-  position: absolute;
-  right: 12px;
-  z-index: 20;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding: 6px;
-  background: var(--panel);
-  border: 1px solid var(--panel-border);
-  border-radius: 12px;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
-  transition: opacity 0.2s ease;
-}
-
-.float-panel.top {
-  top: 12px;
-}
-
-.float-panel.bottom {
-  bottom: 12px;
-}
-
-.float-panel .btn {
-  width: 36px;
-  height: 34px;
-  border-radius: 8px;
-}
-
-.float-panel .handle.live {
-  border-color: var(--accent);
-}
-
-.float-panel .btn.close:hover:not(:disabled) {
-  background: var(--danger-hover-bg);
-  color: var(--danger-hover-text);
-}
-
-.float-panel .btn svg .fill {
-  fill: currentColor;
-  stroke: none;
-}
-
-/* 铺满屏幕时鼠标不在顶部则隐藏悬浮面板 */
-.float-panel.fs-hide {
-  opacity: 0;
-  pointer-events: none;
-}
-
 /* 全屏（铺满屏幕）：工具栏滑出隐藏，画面去 bezel 填满 */
 .mirror-page.fullscreen .toolbar {
   position: absolute;
@@ -1343,9 +1433,8 @@ onUnmounted(() => {
 
 .screen {
   display: block;
-  /* 画面铺满主窗口：窗口尺寸 = 画面尺寸（syncWindowSize 驱动） */
-  max-width: 100vw;
-  max-height: 100vh;
+  max-width: calc(100vw - 48px);
+  max-height: calc(100vh - 100px);
   background: #000;
   cursor: pointer;
   touch-action: none;

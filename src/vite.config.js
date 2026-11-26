@@ -77,7 +77,6 @@ export default defineConfig(({mode}) => {
                     document_manager: resolve(__dirname, 'document_manager.html'),
                     document_manager_widget: resolve(__dirname, 'document_manager_widget.html'),
                     mirror: resolve(__dirname, 'mirror.html'),
-                    mirror_controls: resolve(__dirname, 'mirror_controls.html'),
                 },
                 output: {
                     manualChunks(id) {
