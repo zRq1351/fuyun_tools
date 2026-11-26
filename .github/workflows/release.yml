@@ -54,13 +54,42 @@ jobs:
         uses: actions/cache@v4
         with:
           path: C:\Program Files\LLVM
-          key: llvm-${{ runner.os }}-v1
+          key: llvm-${{ runner.os }}-v2-clang22
           restore-keys: |
-            llvm-${{ runner.os }}-
+            llvm-${{ runner.os }}-v2-clang22
 
-      - name: 安装 LLVM（提供 clang/libclang）
+      # 注意：choco 的 llvm 版本滞后（20.x），而 runner 的 MSVC 14.5x STL 要求 Clang 22+，
+      # 否则 binding generator 解析头文件时报 STL1000 静态断言失败。改用 winget 装最新版，失败则回退官方安装包。
+      - name: 安装 LLVM（Clang 22+）
         if: steps.cache-llvm.outputs.cache-hit != 'true'
-        run: choco install llvm --no-progress -y
+        shell: pwsh
+        run: |
+          $installed = $false
+          try {
+            winget install --id LLVM.LLVM -e --accept-source-agreements --accept-package-agreements --disable-interactivity
+            $installed = Test-Path 'C:\Program Files\LLVM\bin\clang.exe'
+          } catch { Write-Host "winget 安装失败：$_" }
+          if (-not $installed) {
+            Write-Host '回退：下载官方 LLVM 22.1.2 安装包'
+            $url = 'https://github.com/llvm/llvm-project/releases/download/llvmorg-22.1.2/LLVM-22.1.2-win64.exe'
+            Invoke-WebRequest -Uri $url -OutFile "$env:TEMP\llvm-setup.exe"
+            Start-Process -FilePath "$env:TEMP\llvm-setup.exe" -ArgumentList '/S' -Wait
+          }
+          & 'C:\Program Files\LLVM\bin\clang.exe' --version | Select-Object -First 1
+
+      - name: 校验 LLVM 版本（需 Clang 22+）
+        shell: pwsh
+        run: |
+          $line = (& 'C:\Program Files\LLVM\bin\clang.exe' --version | Select-Object -First 1)
+          Write-Host $line
+          if ($line -match 'version (\d+)') {
+            $major = [int]$Matches[1]
+            if ($major -lt 22) {
+              throw "LLVM 版本过低（clang $major）：runner 的 MSVC STL 要求 Clang 22+ 才能解析 opencv 头文件"
+            }
+          } else {
+            throw "无法识别 clang 版本：$line"
+          }
 
       - name: Cache vcpkg
         id: cache-vcpkg
