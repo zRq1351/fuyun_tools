@@ -222,23 +222,33 @@
         {{ toastMsg }}
       </div>
       <div
-        v-if="!connected"
+        v-if="!connected || !frameReady"
         class="placeholder"
       >
-        <div class="placeholder-icon">
-          <svg viewBox="0 0 24 24"><rect
-            x="7"
-            y="2.5"
-            width="10"
-            height="19"
-            rx="2.5"
-          /><path d="M10.5 19h3" /></svg>
-        </div>
         <template v-if="errorMsg">
+          <div class="placeholder-icon">
+            <svg viewBox="0 0 24 24"><rect
+              x="7"
+              y="2.5"
+              width="10"
+              height="19"
+              rx="2.5"
+            /><path d="M10.5 19h3" /></svg>
+          </div>
           {{ errorMsg }}
         </template>
         <template v-else>
-          正在连接设备…
+          <!-- 加载中：连接设备 → 等待首帧画面 -->
+          <div class="loading-ring" />
+          <div class="loading-text">
+            {{ connected ? '正在等待手机画面…' : '正在连接设备…' }}
+          </div>
+          <div
+            v-if="connected && waitingLong"
+            class="loading-hint"
+          >
+            若长时间没有画面：请确认手机未锁屏、投屏授权弹窗已点「允许」，或点亮手机屏幕后再试
+          </div>
         </template>
       </div>
       <div
@@ -346,6 +356,10 @@ const canvasRef = ref(null)
 const kbdRef = ref(null)
 const connected = ref(false)
 const errorMsg = ref('')
+// 首帧是否已绘制：未就绪时显示加载态，避免黑屏被误认为失败
+const frameReady = ref(false)
+const waitingLong = ref(false)
+let frameWaitTimer = null
 const statusText = ref('未连接')
 const isFs = ref(false)
 const barShow = ref(true)
@@ -474,6 +488,11 @@ function drawFrame(frame) {
   const ctx = canvas.getContext('2d')
   ctx.drawImage(frame, 0, 0, frame.displayWidth, frame.displayHeight)
   frame.close()
+  if (!frameReady.value) {
+    frameReady.value = true
+    waitingLong.value = false
+    if (frameWaitTimer) { clearTimeout(frameWaitTimer); frameWaitTimer = null }
+  }
 }
 
 // Annex-B → AVCC：description（avcC）模式下 WebCodecs 要求数据为
@@ -1072,6 +1091,11 @@ function connectWebSocket(port) {
   ws.onopen = () => {
     connected.value = true
     errorMsg.value = ''
+    frameReady.value = false
+    waitingLong.value = false
+    if (frameWaitTimer) clearTimeout(frameWaitTimer)
+    // 8 秒仍无画面 → 给出排查提示（设备可能锁屏/授权未点）
+    frameWaitTimer = setTimeout(() => { waitingLong.value = true }, 8000)
     statusText.value = '已连接'
     refocusKbd() // 为 IME 组合输入聚焦捕获框
     // 会话重建（切换设备/独立投屏/自动恢复）后保持息屏状态
@@ -1086,6 +1110,9 @@ function connectWebSocket(port) {
   }
   ws.onclose = () => {
     connected.value = false
+    frameReady.value = false
+    waitingLong.value = false
+    if (frameWaitTimer) { clearTimeout(frameWaitTimer); frameWaitTimer = null }
     if (!stopped) errorMsg.value = '与投屏服务的连接已断开'
     statusText.value = '未连接'
   }
@@ -1131,6 +1158,7 @@ onMounted(async () => {
 onUnmounted(() => {
   stopped = true
   if (watchdogTimer) { clearInterval(watchdogTimer); watchdogTimer = null }
+  if (frameWaitTimer) { clearTimeout(frameWaitTimer); frameWaitTimer = null }
   if (swipeGesture) { clearInterval(swipeGesture.timer); swipeGesture = null }
   if (unlistenResize) { unlistenResize(); unlistenResize = null }
   if (unlistenDrag) { unlistenDrag(); unlistenDrag = null }
@@ -1464,6 +1492,33 @@ onUnmounted(() => {
   stroke-width: 1.6;
   stroke-linecap: round;
   opacity: 0.6;
+}
+
+/* 加载态：旋转环 + 文案（首帧出来前的过渡，避免黑屏被误判为失败） */
+.loading-ring {
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  border: 3px solid rgba(255, 255, 255, 0.14);
+  border-top-color: var(--accent, #35bf6c);
+  animation: mirror-spin 0.9s linear infinite;
+}
+
+@keyframes mirror-spin {
+  to { transform: rotate(360deg); }
+}
+
+.loading-text {
+  color: var(--text);
+  font-size: 14px;
+}
+
+.loading-hint {
+  max-width: 320px;
+  font-size: 12px;
+  line-height: 1.7;
+  color: var(--muted);
+  opacity: 0.85;
 }
 
 /* 键盘/IME 捕获输入框：不可见但保持焦点（需真实尺寸否则部分 IME 不附着） */
