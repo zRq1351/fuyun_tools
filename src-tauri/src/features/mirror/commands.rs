@@ -485,7 +485,7 @@ pub async fn mirror_stop(app: AppHandle) -> Result<(), String> {
 
 /// 读取手机当前前台应用（投屏窗口「独立投屏」按钮用）。
 #[tauri::command]
-pub async fn mirror_foreground_app(app: AppHandle) -> Result<serde_json::Value, String> {
+pub async fn mirror_foreground_app(_app: AppHandle) -> Result<serde_json::Value, String> {
     let (adb_path, serial) = {
         let guard = state().session.lock().unwrap();
         match guard.as_ref() {
