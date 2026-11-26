@@ -27,7 +27,8 @@
     "launcher",
     "document_manager",
     "document_manager_widget",
-    "mirror"
+    "mirror",
+    "mirror-controls"
   ],
   "permissions": [
     "core:path:default",

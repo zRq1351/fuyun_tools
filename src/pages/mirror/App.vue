@@ -10,6 +10,7 @@
       <div
         class="device"
         :class="{ live: connected }"
+        data-tauri-drag-region
       >
         <canvas
           ref="canvasRef"
@@ -817,6 +818,7 @@ function emitState() {
 
 async function handleRemoteCmd(action) {
   switch (action) {
+    case 'start-drag': await getCurrentWindow().startDragging(); break
     case 'win-min': await minimizeWindow(); break
     case 'win-fs': await toggleFullscreen(); break
     case 'win-close': await closeWindow(); break

@@ -1,5 +1,8 @@
 <template>
-  <div class="controls-page">
+  <div
+    class="controls-page"
+    @mousedown="onPageMouseDown"
+  >
     <!-- 上组：窗口控制 -->
     <div
       class="fgroup top"
@@ -237,6 +240,13 @@ function toggleGroup(which) {
       bottomOpen.value = false
     }, 5000)
   }
+}
+
+// 非按钮区域按下 = 拖动主窗口（主窗口 startDragging，控制条随主窗口移动）
+function onPageMouseDown(e) {
+  if (e.button !== 0) return
+  if (e.target && e.target.closest && e.target.closest('.fbtn')) return
+  emit('mirror-cmd', {action: 'start-drag'})
 }
 
 function cmd(action) {
