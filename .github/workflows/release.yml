@@ -67,9 +67,9 @@ jobs:
         uses: actions/cache@v4
         with:
           path: D:\vcpkg
-          key: vcpkg-opencv-${{ runner.os }}-static-md-v2
+          key: vcpkg-opencv-${{ runner.os }}-static-md-v3
           restore-keys: |
-            vcpkg-opencv-${{ runner.os }}-static-md
+            vcpkg-opencv-${{ runner.os }}-static-md-v3
 
       - name: 安装 vcpkg 并集成
         if: steps.cache-vcpkg.outputs.cache-hit != 'true'
@@ -85,16 +85,32 @@ jobs:
         run: |
           & D:\vcpkg\vcpkg.exe install opencv4:x64-windows-static-md
 
+      - name: OpenCV 构建环境自检
+        shell: pwsh
+        run: |
+          Write-Host '--- vcpkg 版本 ---'
+          & D:\vcpkg\vcpkg.exe version 2>&1 | Select-Object -First 3
+          Write-Host '--- opencv4 安装记录 ---'
+          & D:\vcpkg\vcpkg.exe list 2>&1 | Select-String -Pattern 'opencv4'
+          Write-Host '--- 静态库 ---'
+          Get-ChildItem D:\vcpkg\installed\x64-windows-static-md\lib\opencv* -ErrorAction SilentlyContinue |
+            Select-Object -First 10 -ExpandProperty Name
+          Write-Host '--- pkgconfig 文件数 ---'
+          (Get-ChildItem D:\vcpkg\installed\x64-windows-static-md\lib\pkgconfig\*.pc -ErrorAction SilentlyContinue |
+            Measure-Object).Count
+          Write-Host '--- clang 版本 ---'
+          & 'C:\Program Files\LLVM\bin\clang.exe' --version | Select-Object -First 1
+
       - name: 构建并发布 Tauri 应用
         uses: tauri-apps/tauri-action@v0
         env:
           RUSTFLAGS: "-C linker=lld-link"
+          RUST_BACKTRACE: "1"
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           VCPKG_ROOT: D:\vcpkg
           VCPKGRS_TRIPLET: x64-windows-static-md
-          VCPKGRS_DYNAMIC: "0"
           OpenCV_DIR: D:\vcpkg\installed\x64-windows-static-md\share\opencv4
           OPENCV_MSVC_CRT: dynamic
           OPENCV_DISABLE_PROBES: environment,cmake,vcpkg_cmake,pkg_config
