@@ -158,13 +158,13 @@ pub async fn mirror_start(
     let app_for_history = app.clone();
     let name_for_history = device_name.clone();
     let serial_for_history = session_serial.clone();
-    let _ = tauri::async_runtime::spawn_blocking(move || {
+    drop(tauri::async_runtime::spawn_blocking(move || {
         if let Err(e) =
             record_device_history(&app_for_history, &name_for_history, &serial_for_history)
         {
             log::warn!("[mirror] 设备历史记录失败: {}", e);
         }
-    });
+    }));
 
     super::window::show_mirror_window(&app)?;
     log::info!(
@@ -305,7 +305,7 @@ fn record_device_history(app: &AppHandle, name: &str, serial: &str) -> Result<()
             conn_type: conn_type.to_string(),
         });
     }
-    devices.sort_by(|a, b| b.last_used_ms.cmp(&a.last_used_ms));
+    devices.sort_by_key(|d| std::cmp::Reverse(d.last_used_ms));
     save_history(app, &devices)
 }
 
