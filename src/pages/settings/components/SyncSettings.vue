@@ -91,6 +91,12 @@
 
         <!-- 配对码 -->
         <div class="pairing-block">
+          <img
+            v-if="pairQr"
+            class="pairing-qr"
+            :src="pairQr"
+            alt="配对二维码"
+          >
           <div class="pairing-code">
             {{ status.pairingCode || '------' }}
           </div>
@@ -299,7 +305,8 @@
 </template>
 
 <script setup>
-import {computed, onMounted, onUnmounted, reactive, ref} from 'vue'
+import {computed, onMounted, onUnmounted, reactive, ref, watch} from 'vue'
+import QRCode from 'qrcode'
 import {useI18n} from 'vue-i18n'
 import {ElMessage, ElMessageBox} from 'element-plus'
 import {SyncService, MirrorService} from '../../../services/ipc'
@@ -525,6 +532,32 @@ const address = computed(() => {
     return `http://${status.localIp}:${status.port}`
 })
 
+/**
+ * 配对二维码：手机端「浮云」扫码后自动填入地址与配对码。
+ * 内容格式 fuyun://pair?host=<ip:port>&code=<6位>，手机端用正则解析，兼容纯文本。
+ */
+const pairQr = ref('')
+
+watch(
+    [address, () => status.pairingCode],
+    async () => {
+        const hostPort = address.value.replace(/^https?:\/\//, '')
+        if (!hostPort || !status.pairingCode) {
+            pairQr.value = ''
+            return
+        }
+        try {
+            pairQr.value = await QRCode.toDataURL(
+                `fuyun://pair?host=${hostPort}&code=${status.pairingCode}`,
+                {margin: 1, width: 360, errorCorrectionLevel: 'M'},
+            )
+        } catch {
+            pairQr.value = ''
+        }
+    },
+    {immediate: true},
+)
+
 async function refreshStatus() {
     try {
         const snapshot = await SyncService.getStatus()
@@ -690,6 +723,17 @@ onUnmounted(() => {
   border: 1px dashed var(--el-border-color);
   border-radius: 8px;
   margin-bottom: 16px;
+}
+
+.pairing-qr {
+  display: block;
+  width: 168px;
+  height: 168px;
+  margin: 0 auto 12px;
+  padding: 6px;
+  border-radius: 8px;
+  /* 二维码需要纯白底才扫得动，固定白色不跟随深色主题 */
+  background: #ffffff;
 }
 
 .pairing-code {
