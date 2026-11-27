@@ -1,7 +1,7 @@
 <template>
   <div
     class="mirror-page"
-    :class="[theme, { fullscreen: isFs, 'bar-show': barShow, cover: fitMode === 'cover' }]"
+    :class="[theme, { fullscreen: isFs, 'bar-show': barShow, 'no-frame': fitMode !== 'contain' }]"
     @mousemove="onMouseMove"
   >
     <div
@@ -154,7 +154,7 @@
           <button
             class="btn"
             :disabled="!connected"
-            :title="fitMode === 'cover' ? '铺满（裁剪边缘）· 点击改为适应' : '适应窗口 · 点击改为铺满'"
+            :title="`当前：${FIT_LABELS[fitMode]} · 点击切换显示方式`"
             @click="toggleFitMode"
           >
             <svg
@@ -162,9 +162,13 @@
               viewBox="0 0 24 24"
             ><path d="M4 8V5.5A1.5 1.5 0 0 1 5.5 4H8M16 4h2.5A1.5 1.5 0 0 1 20 5.5V8M20 16v2.5a1.5 1.5 0 0 1-1.5 1.5H16M8 20H5.5A1.5 1.5 0 0 1 4 18.5V16" /></svg>
             <svg
-              v-else
+              v-else-if="fitMode === 'cover'"
               viewBox="0 0 24 24"
             ><path d="M4 4h6v2H6v4H4V4zM20 4v6h-2V6h-4V4h6zM4 20v-6h2v4h4v2H4zM20 20h-6v-2h4v-4h2v6z" /></svg>
+            <svg
+              v-else
+              viewBox="0 0 24 24"
+            ><path d="M4 9V5.5A1.5 1.5 0 0 1 5.5 4H9M15 4h3.5A1.5 1.5 0 0 1 20 5.5V9M20 15v3.5a1.5 1.5 0 0 1-1.5 1.5H15M9 20H5.5A1.5 1.5 0 0 1 4 18.5V15" /></svg>
           </button>
           <button
             class="btn"
@@ -378,7 +382,14 @@ let frameWaitTimer = null
 const statusText = ref('未连接')
 const isFs = ref(false)
 // 画面铺放方式：contain = 适应窗口（保持比例、可能留边），cover = 铺满（裁剪边缘）
-const fitMode = ref(localStorage.getItem('fuyun-mirror-fit') === 'cover' ? 'cover' : 'contain')
+// 'contain' 适应（完整显示，可能留边）| 'cover' 铺满（裁边）| 'fill' 拉伸（变形，不留边）
+const FIT_MODES = ['contain', 'cover', 'fill']
+const FIT_LABELS = {contain: '适应窗口', cover: '铺满（裁边）', fill: '拉伸（变形）'}
+const fitMode = ref(
+  FIT_MODES.includes(localStorage.getItem('fuyun-mirror-fit'))
+    ? localStorage.getItem('fuyun-mirror-fit')
+    : 'contain',
+)
 let lastFitKey = ''
 const barShow = ref(true)
 const dragging = ref(false)
@@ -517,7 +528,23 @@ function drawFrame(frame) {
     waitingLong.value = false
     if (frameWaitTimer) { clearTimeout(frameWaitTimer); frameWaitTimer = null }
   window.removeEventListener('resize', onWindowResize)
+  if (stageObserver) {
+    stageObserver.disconnect()
+    stageObserver = null
+  }
+  if (stageObserver) {
+    stageObserver.disconnect()
+    stageObserver = null
+  }
   window.removeEventListener('resize', onWindowResize)
+  if (stageObserver) {
+    stageObserver.disconnect()
+    stageObserver = null
+  }
+  if (stageObserver) {
+    stageObserver.disconnect()
+    stageObserver = null
+  }
   }
 }
 
@@ -876,6 +903,12 @@ function applyFit() {
   const boxW = stage.clientWidth
   const boxH = stage.clientHeight
   if (!boxW || !boxH) return
+  if (fitMode.value === 'fill') {
+    // 拉伸：填满容器，比例可能变形，但不裁剪
+    canvas.style.width = `${boxW}px`
+    canvas.style.height = `${boxH}px`
+    return
+  }
   const scale =
     fitMode.value === 'cover'
       ? Math.max(boxW / canvas.width, boxH / canvas.height)
@@ -892,12 +925,26 @@ function onWindowResize() {
 }
 
 window.addEventListener('resize', onWindowResize)
+// stage 尺寸变化（窗口拖动、工具栏显示/隐藏、进出全屏）时同步缩放
+let stageObserver = null
+onMounted(() => {
+  if (typeof ResizeObserver === 'undefined' || !stageRef.value) return
+  stageObserver = new ResizeObserver(() => onWindowResize())
+  stageObserver.observe(stageRef.value)
+})
 
 function toggleFitMode() {
-  fitMode.value = fitMode.value === 'cover' ? 'contain' : 'cover'
-  localStorage.setItem('fuyun-mirror-fit', fitMode.value)
+  const next = FIT_MODES[(FIT_MODES.indexOf(fitMode.value) + 1) % FIT_MODES.length]
+  fitMode.value = next
+  localStorage.setItem('fuyun-mirror-fit', next)
   lastFitKey = ''
   applyFit()
+  const tips = {
+    contain: '适应窗口：完整显示，比例不符时留边',
+    cover: '铺满：填满窗口，边缘会被裁掉',
+    fill: '拉伸：填满窗口，画面比例会变形',
+  }
+  showToast(tips[next])
 }
 
 // 最大化键语义：在「铺满屏幕」（真全屏）与窗口化之间切换
@@ -1177,7 +1224,23 @@ function connectWebSocket(port) {
     waitingLong.value = false
     if (frameWaitTimer) { clearTimeout(frameWaitTimer); frameWaitTimer = null }
   window.removeEventListener('resize', onWindowResize)
+  if (stageObserver) {
+    stageObserver.disconnect()
+    stageObserver = null
+  }
+  if (stageObserver) {
+    stageObserver.disconnect()
+    stageObserver = null
+  }
   window.removeEventListener('resize', onWindowResize)
+  if (stageObserver) {
+    stageObserver.disconnect()
+    stageObserver = null
+  }
+  if (stageObserver) {
+    stageObserver.disconnect()
+    stageObserver = null
+  }
     if (!stopped) errorMsg.value = '与投屏服务的连接已断开'
     statusText.value = '未连接'
   }
@@ -1225,7 +1288,23 @@ onUnmounted(() => {
   if (watchdogTimer) { clearInterval(watchdogTimer); watchdogTimer = null }
   if (frameWaitTimer) { clearTimeout(frameWaitTimer); frameWaitTimer = null }
   window.removeEventListener('resize', onWindowResize)
+  if (stageObserver) {
+    stageObserver.disconnect()
+    stageObserver = null
+  }
+  if (stageObserver) {
+    stageObserver.disconnect()
+    stageObserver = null
+  }
   window.removeEventListener('resize', onWindowResize)
+  if (stageObserver) {
+    stageObserver.disconnect()
+    stageObserver = null
+  }
+  if (stageObserver) {
+    stageObserver.disconnect()
+    stageObserver = null
+  }
   if (swipeGesture) { clearInterval(swipeGesture.timer); swipeGesture = null }
   if (unlistenResize) { unlistenResize(); unlistenResize = null }
   if (unlistenDrag) { unlistenDrag(); unlistenDrag = null }
@@ -1502,7 +1581,7 @@ onUnmounted(() => {
 }
 
 /* 铺满模式：去掉设备外框，画布按容器 cover 缩放，超出部分由 stage 裁剪 */
-.mirror-page.cover .device {
+.mirror-page.no-frame .device {
   padding: 0;
   border: none;
   border-radius: 0;
@@ -1510,7 +1589,7 @@ onUnmounted(() => {
   overflow: hidden;
 }
 
-.mirror-page.cover .screen {
+.mirror-page.no-frame .screen {
   border-radius: 0;
 }
 
