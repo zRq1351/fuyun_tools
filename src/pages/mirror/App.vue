@@ -516,6 +516,8 @@ function drawFrame(frame) {
     frameReady.value = true
     waitingLong.value = false
     if (frameWaitTimer) { clearTimeout(frameWaitTimer); frameWaitTimer = null }
+  window.removeEventListener('resize', onWindowResize)
+  window.removeEventListener('resize', onWindowResize)
   }
 }
 
@@ -1174,6 +1176,8 @@ function connectWebSocket(port) {
     frameReady.value = false
     waitingLong.value = false
     if (frameWaitTimer) { clearTimeout(frameWaitTimer); frameWaitTimer = null }
+  window.removeEventListener('resize', onWindowResize)
+  window.removeEventListener('resize', onWindowResize)
     if (!stopped) errorMsg.value = '与投屏服务的连接已断开'
     statusText.value = '未连接'
   }
@@ -1220,6 +1224,8 @@ onUnmounted(() => {
   stopped = true
   if (watchdogTimer) { clearInterval(watchdogTimer); watchdogTimer = null }
   if (frameWaitTimer) { clearTimeout(frameWaitTimer); frameWaitTimer = null }
+  window.removeEventListener('resize', onWindowResize)
+  window.removeEventListener('resize', onWindowResize)
   if (swipeGesture) { clearInterval(swipeGesture.timer); swipeGesture = null }
   if (unlistenResize) { unlistenResize(); unlistenResize = null }
   if (unlistenDrag) { unlistenDrag(); unlistenDrag = null }
@@ -1535,8 +1541,6 @@ onUnmounted(() => {
 
 .screen {
   display: block;
-  max-width: calc(100vw - 48px);
-  max-height: calc(100vh - 100px);
   background: #000;
   cursor: pointer;
   touch-action: none;
