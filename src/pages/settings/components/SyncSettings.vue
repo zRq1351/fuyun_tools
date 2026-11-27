@@ -22,165 +22,193 @@
       {{ $t('settings.sync.moduleDisabledHint') }}
     </div>
 
-    <!-- 手机连接状态总览：App（同步）与 ADB（投屏）两条通道一屏看清 -->
-    <div
-      v-if="form.phoneEnabled"
-      class="link-status"
-    >
-      <div class="ls-item">
-        <span class="ls-label">手机 App（剪贴板同步）</span>
-        <el-tag
-          size="small"
-          :type="status.running ? (status.paired ? 'success' : 'primary') : 'info'"
-        >
-          {{ status.running ? (status.paired ? '运行中 · 已配对' : '运行中 · 待配对') : '已停止' }}
-        </el-tag>
-      </div>
-      <div class="ls-item">
-        <span class="ls-label">ADB 设备（投屏通道）</span>
-        <el-tag
-          size="small"
-          :type="adbStatus.connected ? 'success' : 'info'"
-        >
-          {{ adbStatus.connected ? `已连接 ${adbStatus.serial}` : '未连接' }}
-        </el-tag>
-      </div>
-      <el-button
-        size="small"
-        text
-        :loading="linkRefreshing"
-        @click="refreshLinkStatus"
-      >
-        刷新
-      </el-button>
-    </div>
-
-    <template v-if="form.phoneEnabled">
-      <!-- 剪贴板同步 -->
-      <div class="sub-title">
-        {{ $t('settings.sync.syncTitle') }}
-      </div>
-
-      <!-- 开关 -->
-      <div class="sync-toggle-row">
-        <div class="sync-toggle-text">
-          <p>{{ $t('settings.sync.enableHint') }}</p>
-        </div>
-        <el-switch
-          v-model="enabled"
-          :loading="switching"
-          :active-text="$t('settings.sync.enable')"
-          @change="onToggle"
-        />
-      </div>
-
-      <template v-if="status.running">
-        <!-- 状态信息 -->
-        <el-descriptions
-          :column="2"
-          border
-          class="sync-status-card"
-        >
-          <el-descriptions-item :label="$t('settings.sync.pcName')">
-            {{ status.pcName }}
-          </el-descriptions-item>
-          <el-descriptions-item :label="$t('settings.sync.port')">
-            {{ status.port }}
-          </el-descriptions-item>
-        </el-descriptions>
-
-        <!-- 配对码 -->
-        <div class="pairing-block">
-          <img
-            v-if="pairQr"
-            class="pairing-qr"
-            :src="pairQr"
-            alt="配对二维码"
+    <template v-else>
+      <!-- 连接状态总览（一行看清两条通道） -->
+      <div class="link-status">
+        <div class="ls-item">
+          <span class="ls-label">手机 App</span>
+          <el-tag
+            size="small"
+            :type="status.running ? (status.paired ? 'success' : 'primary') : 'info'"
           >
-          <div class="pairing-code">
-            {{ status.pairingCode || '------' }}
+            {{ status.running ? (status.paired ? '已配对' : '待配对') : '服务已停止' }}
+          </el-tag>
+        </div>
+        <div class="ls-item">
+          <span class="ls-label">ADB 设备</span>
+          <el-tag
+            size="small"
+            :type="adbStatus.connected ? 'success' : 'info'"
+          >
+            {{ adbStatus.connected ? adbStatus.serial : '未连接' }}
+          </el-tag>
+        </div>
+        <el-button
+          size="small"
+          text
+          :loading="linkRefreshing"
+          @click="refreshLinkStatus"
+        >
+          刷新
+        </el-button>
+      </div>
+
+      <!-- ===== 剪贴板同步 ===== -->
+      <div class="section-card">
+        <div class="section-head">
+          <div class="section-title">
+            剪贴板同步
           </div>
-          <div class="pairing-meta">
-            <span v-if="status.pairingCode && status.pairingExpiresInSecs > 0">
-              {{ $t('settings.sync.expiresIn', {secs: status.pairingExpiresInSecs}) }}
-            </span>
-            <span v-else>{{ $t('settings.sync.codeExpired') }}</span>
+          <div class="section-head-actions">
             <el-button
               size="small"
-              @click="onRegenerate"
+              text
+              @click="syncHelpOpen = true"
             >
-              {{ $t('settings.sync.regenerate') }}
+              使用帮助
             </el-button>
+            <el-switch
+              v-model="enabled"
+              :loading="switching"
+              @change="onToggle"
+            />
           </div>
-          <p class="hint">
-            {{ $t('settings.sync.pairingCodeHint') }}
-          </p>
         </div>
 
-        <!-- 手动连接地址 -->
-        <div
-          v-if="address"
-          class="address-row"
-        >
-          <span>{{ $t('settings.sync.address') }}：<code>{{ address }}</code></span>
-          <el-button
-            size="small"
-            @click="copyAddress"
-          >
-            {{ $t('settings.sync.copyAddress') }}
-          </el-button>
-        </div>
-
-        <!-- 已配对设备 -->
+        <!-- 已配对设备（手机型号 / IP / 在线状态 / 最近活跃） -->
         <div
           v-if="status.paired"
-          class="paired-row"
+          class="device-row"
         >
-          <el-tag type="success">
-            {{ $t('settings.sync.paired') }}
-          </el-tag>
+          <div class="device-avatar">
+            <svg viewBox="0 0 24 24"><rect
+              x="7"
+              y="2.5"
+              width="10"
+              height="19"
+              rx="2.5"
+            /><path d="M10.5 19h3" /></svg>
+          </div>
+          <div class="device-info">
+            <div class="device-name">
+              {{ status.deviceName || '已配对的手机' }}
+              <span
+                class="device-dot"
+                :class="{ online: status.deviceOnline }"
+              />
+              <span class="device-state">{{ status.deviceOnline ? '在线' : '离线' }}</span>
+            </div>
+            <div class="device-meta">
+              {{ status.deviceIp || '地址未知' }}
+              <template v-if="status.lastSeenMs">
+                · 最近活跃 {{ lastSeenLabel(status.lastSeenMs) }}
+              </template>
+            </div>
+          </div>
           <el-button
             size="small"
             type="danger"
+            plain
             @click="onUnpair"
           >
-            {{ $t('settings.sync.unpair') }}
+            吊销设备
           </el-button>
-          <span class="hint">{{ $t('settings.sync.unpairHint') }}</span>
         </div>
-      </template>
+        <div
+          v-else
+          class="device-empty"
+        >
+          尚未配对 — 手机打开「浮云剪贴板」扫描下方二维码即可自动完成配对
+        </div>
 
-      <!-- 使用说明 -->
-      <div class="how-to">
-        <h4>{{ $t('settings.sync.howToTitle') }}</h4>
-        <p>{{ $t('settings.sync.howToStep1') }}</p>
-        <p>{{ $t('settings.sync.howToStep2') }}</p>
-        <p>{{ $t('settings.sync.howToStep3') }}</p>
-        <p>{{ $t('settings.sync.howToStep4') }}</p>
+        <!-- 配对二维码 -->
+        <template v-if="status.running">
+          <div
+            v-if="!status.paired || showPairBox"
+            class="pair-box"
+          >
+            <img
+              v-if="pairQr"
+              class="pairing-qr"
+              :src="pairQr"
+              alt="配对二维码"
+            >
+            <div class="pair-side">
+              <div class="pair-code">
+                {{ status.pairingCode || '------' }}
+              </div>
+              <div class="pair-meta">
+                <span v-if="status.pairingCode && status.pairingExpiresInSecs > 0">
+                  {{ $t('settings.sync.expiresIn', {secs: status.pairingExpiresInSecs}) }}
+                </span>
+                <span v-else>{{ $t('settings.sync.codeExpired') }}</span>
+                <el-button
+                  size="small"
+                  text
+                  @click="onRegenerate"
+                >
+                  换一个
+                </el-button>
+              </div>
+              <div class="pair-hint">
+                手机扫码即自动完成配对
+              </div>
+              <div
+                v-if="address"
+                class="pair-address"
+              >
+                <code>{{ address }}</code>
+                <el-button
+                  size="small"
+                  text
+                  @click="copyAddress"
+                >
+                  {{ $t('settings.sync.copyAddress') }}
+                </el-button>
+              </div>
+            </div>
+          </div>
+          <div
+            v-else
+            class="device-empty pair-collapsed"
+          >
+            要连接新手机？
+            <el-button
+              size="small"
+              text
+              @click="showPairBox = true"
+            >
+              显示配对二维码
+            </el-button>
+          </div>
+        </template>
+        <div
+          v-else
+          class="device-empty"
+        >
+          打开上方开关启动同步服务后显示配对二维码
+        </div>
       </div>
 
-      <!-- 手机投屏 -->
-      <div class="mirror-entry">
-        <h4>{{ $t('settings.sync.mirrorTitle') }}</h4>
-        <p class="hint">
-          将手机画面实时投屏到电脑，并支持鼠标点击、滑动等反向控制。
-          连接前需在手机上<b>开启开发者模式</b>：USB 投屏需打开「USB 调试」，WiFi 首次连接需「无线调试」（Android 11+）或先插线切换。
-        </p>
-        <el-collapse class="mirror-guide">
-          <el-collapse-item
-            title="首次使用？展开查看手机设置步骤"
-            name="guide"
-          >
-            <p>1. 手机「设置 → 关于手机」→ 连续点击「版本号」7 次，开启开发者模式</p>
-            <p>2. 进入「设置 → 系统 → 开发者选项」</p>
-            <p>3. USB 投屏：打开「USB 调试」，插上数据线，在手机弹窗中点「允许」</p>
-            <p>4. WiFi 投屏（Android 11+）：打开「无线调试」；或先插线用「USB 一键切换无线」</p>
-            <p>5. 中文输入：先在投屏画面上点击手机输入框，键盘弹出后再打字</p>
-          </el-collapse-item>
-        </el-collapse>
+      <!-- ===== 手机投屏 ===== -->
+      <div class="section-card">
+        <div class="section-head">
+          <div class="section-title">
+            手机投屏
+          </div>
+          <div class="section-head-actions">
+            <el-button
+              size="small"
+              text
+              @click="mirrorHelpOpen = true"
+            >
+              使用帮助
+            </el-button>
+          </div>
+        </div>
 
-        <div class="mirror-modes">
-          <div class="mode-card">
+        <div class="mode-grid">
+          <div class="mode-item">
             <div class="mode-title">
               USB 投屏
               <el-tag
@@ -190,10 +218,11 @@
                 推荐
               </el-tag>
             </div>
-            <p class="mode-desc">
-              数据线连接，延迟低、画面稳定，不依赖 WiFi。
-            </p>
+            <div class="mode-desc">
+              数据线连接，延迟最低
+            </div>
             <el-button
+              class="mode-btn"
               type="primary"
               :loading="mirrorStarting"
               @click="onStartMirror"
@@ -201,22 +230,25 @@
               开启 USB 投屏
             </el-button>
           </div>
-          <div class="mode-card">
+          <div class="mode-item">
             <div class="mode-title">
               WiFi 投屏
             </div>
-            <p class="mode-desc">
-              手机与电脑在同一 WiFi 下连接，无需数据线（画面延迟略高于 USB）。
-              手机重启后无线模式失效，需重新插线切换或配对。
-            </p>
-            <div class="mode-actions">
+            <div class="mode-desc">
+              同一 Wi-Fi 下无线投屏
+            </div>
+            <div class="mode-btn-row">
               <el-button
+                class="mode-btn"
+                type="primary"
+                plain
                 :loading="wirelessStarting"
                 @click="onEnableWireless"
               >
-                USB 一键切换无线
+                一键切换无线
               </el-button>
               <el-button
+                class="mode-btn"
                 :loading="wirelessConnecting"
                 @click="onConnectWireless"
               >
@@ -228,47 +260,65 @@
 
         <!-- 画质模式 -->
         <div class="quality-block">
-          <div class="mode-title">
+          <div class="quality-label">
             画质模式
           </div>
-          <p class="mode-desc">
-            影响清晰度、流畅度与延迟；切换后下次开启投屏生效（USB 带宽充裕，可选更高档位）。
-          </p>
-          <div class="quality-row">
-            <el-radio-group
-              v-model="qualityMode"
+          <el-radio-group
+            v-model="qualityMode"
+            size="small"
+            @change="onQualityChange"
+          >
+            <el-radio-button value="smooth">
+              流畅
+            </el-radio-button>
+            <el-radio-button value="balanced">
+              均衡
+            </el-radio-button>
+            <el-radio-button value="hd">
+              高清 60fps
+            </el-radio-button>
+            <el-radio-button value="native">
+              原生
+            </el-radio-button>
+          </el-radio-group>
+          <span class="quality-hint">{{ qualityHint }}</span>
+        </div>
+
+        <!-- 当前投屏会话（停止投屏 / 注销） -->
+        <div class="session-row">
+          <div class="session-info">
+            <span class="session-label">当前投屏</span>
+            <el-tag
+              v-if="mirrorSession.running"
               size="small"
-              @change="onQualityChange"
+              type="success"
             >
-              <el-radio-button value="smooth">
-                流畅
-              </el-radio-button>
-              <el-radio-button value="balanced">
-                均衡
-              </el-radio-button>
-              <el-radio-button value="hd">
-                高清 60fps
-              </el-radio-button>
-              <el-radio-button value="native">
-                原生
-              </el-radio-button>
-            </el-radio-group>
-            <span class="quality-hint">{{ qualityHint }}</span>
+              {{ mirrorSession.deviceName || '设备' }} · 运行中
+            </el-tag>
+            <el-tag
+              v-else
+              size="small"
+              type="info"
+            >
+              未投屏
+            </el-tag>
           </div>
+          <el-button
+            size="small"
+            type="danger"
+            plain
+            :disabled="!mirrorSession.running"
+            :loading="mirrorStopping"
+            @click="onStopMirror"
+          >
+            停止投屏
+          </el-button>
         </div>
 
         <!-- 历史设备：多台手机快速切换 -->
         <template v-if="deviceHistory.length">
           <div class="history-title">
             历史设备
-            <el-button
-              size="small"
-              text
-              class="history-refresh"
-              @click="refreshDeviceHistory"
-            >
-              刷新
-            </el-button>
           </div>
           <div
             v-for="d in deviceHistory"
@@ -300,6 +350,45 @@
           </div>
         </template>
       </div>
+
+      <!-- 使用帮助弹窗（把长文字说明从页面移出） -->
+      <el-dialog
+        v-model="syncHelpOpen"
+        title="剪贴板同步 · 使用说明"
+        width="520px"
+        append-to-body
+      >
+        <ol class="help-list">
+          <li>电脑端打开「剪贴板同步」开关，页面会显示 6 位配对码</li>
+          <li>手机安装「浮云剪贴板」，与电脑连同一个 Wi-Fi</li>
+          <li>手机打开 App 自动发现电脑（找不到可手动输入地址）</li>
+          <li>扫描电脑上的二维码即自动配对完成；也可手动输入 6 位配对码</li>
+          <li>电脑复制任意文本/图片 → 手机自动写入剪贴板；手机 App 内可发送文本/图片到电脑</li>
+        </ol>
+        <p class="help-note">
+          为什么手机不能自动读剪贴板？Android 10+ 仅允许前台应用或默认输入法读取剪贴板，
+          因此采用 App 内主动发送的合法方案。
+        </p>
+      </el-dialog>
+
+      <el-dialog
+        v-model="mirrorHelpOpen"
+        title="手机投屏 · 使用说明"
+        width="520px"
+        append-to-body
+      >
+        <ol class="help-list">
+          <li>手机「设置 → 关于手机」连续点击「版本号」7 次，开启开发者模式</li>
+          <li>进入「设置 → 系统 → 开发者选项」</li>
+          <li>USB 投屏：打开「USB 调试」，插上数据线，在手机弹窗点「允许」</li>
+          <li>WiFi 投屏（Android 11+）：打开「无线调试」；或先插线用「一键切换无线」</li>
+          <li>独立投屏（Android 10+）：在投屏窗口工具栏点「独立投屏」，把当前应用投到虚拟显示器，手机可继续做别的事</li>
+          <li>中文输入：先在投屏画面上点击手机输入框，键盘弹出后再打字</li>
+        </ol>
+        <p class="help-note">
+          投屏画面仅经 USB 或局域网传输，不经过任何服务器。
+        </p>
+      </el-dialog>
     </template>
   </div>
 </template>
@@ -346,6 +435,47 @@ const qualityMode = ref('balanced')
 // 统一连接状态：ADB 设备（投屏通道）
 const adbStatus = ref({connected: false, serial: ''})
 const linkRefreshing = ref(false)
+// 使用帮助弹窗 / 配对二维码折叠
+const syncHelpOpen = ref(false)
+const mirrorHelpOpen = ref(false)
+const showPairBox = ref(false)
+// 当前投屏会话（用于「停止投屏/注销」）
+const mirrorSession = ref({running: false, deviceName: ''})
+const mirrorStopping = ref(false)
+let mirrorTimer = null
+
+async function refreshMirrorSession() {
+    try {
+        const r = await MirrorService.getStatus()
+        mirrorSession.value = {running: !!r.running, deviceName: r.deviceName || ''}
+    } catch {
+        mirrorSession.value = {running: false, deviceName: ''}
+    }
+}
+
+async function onStopMirror() {
+    mirrorStopping.value = true
+    try {
+        await MirrorService.stop()
+        ElMessage.success('已停止投屏')
+    } catch (e) {
+        ElMessage.error({message: parseErrorMessage(e) || String(e), duration: 5000})
+    } finally {
+        mirrorStopping.value = false
+        refreshMirrorSession()
+        refreshLinkStatus()
+    }
+}
+
+/** 最近活跃时间的友好展示 */
+function lastSeenLabel(ms) {
+    const diff = Date.now() - Number(ms || 0)
+    if (!ms || diff < 0) return '—'
+    if (diff < 60_000) return '刚刚'
+    if (diff < 3600_000) return `${Math.floor(diff / 60_000)} 分钟前`
+    const d = new Date(Number(ms))
+    return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+}
 
 async function refreshLinkStatus() {
   linkRefreshing.value = true
@@ -415,6 +545,7 @@ async function onReconnectDevice(d) {
     await MirrorService.reconnectDevice(d.serial)
     await startMirrorWithSerial(d.serial)
     refreshDeviceHistory()
+    refreshMirrorSession()
   } catch (e) {
     ElMessage.error({message: parseErrorMessage(e) || String(e), duration: 6000})
   } finally {
@@ -428,6 +559,7 @@ async function startMirrorWithSerial(serial) {
     await MirrorService.start(serial || undefined)
     ElMessage.success('投屏已开启')
     refreshDeviceHistory()
+    refreshMirrorSession()
   } catch (e) {
     ElMessage.error({message: String(e), duration: 5000})
   } finally {
@@ -632,18 +764,25 @@ onMounted(async () => {
     refreshDeviceHistory()
     refreshLinkStatus()
     loadQuality()
+    refreshMirrorSession()
     // 记住用户选择：开启过同步则随设置页自动恢复
     if (localStorage.getItem('fuyun-sync-enabled') === '1' && !status.running) {
         await onToggle(true)
     }
     // 轮询刷新配对码倒计时
     pollTimer = setInterval(refreshStatus, 2000)
+    // 投屏会话状态轮询（设置页被系统回收窗口时也能及时反映）
+    mirrorTimer = setInterval(refreshMirrorSession, 5000)
 })
 
 onUnmounted(() => {
     if (pollTimer) {
         clearInterval(pollTimer)
         pollTimer = null
+    }
+    if (mirrorTimer) {
+        clearInterval(mirrorTimer)
+        mirrorTimer = null
     }
 })
 </script>
@@ -972,5 +1111,269 @@ onUnmounted(() => {
 
 .history-device .el-button {
   margin-left: auto;
+}
+
+/* ===== 分区卡片（剪贴板同步 / 手机投屏） ===== */
+.section-card {
+  padding: 14px 16px;
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 10px;
+  background: var(--fy-bg-card, transparent);
+  margin-bottom: 12px;
+}
+
+.section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.section-title {
+  font-size: 14px;
+  font-weight: 600;
+  padding-left: 8px;
+  border-left: 3px solid var(--el-color-primary);
+  line-height: 1.2;
+}
+
+.section-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+/* 已配对设备 */
+.device-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  border-radius: 10px;
+  background: var(--el-fill-color-lighter, rgba(128, 128, 128, 0.06));
+  margin-bottom: 12px;
+}
+
+.device-avatar {
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--el-color-primary-light-9, rgba(64, 158, 255, 0.1));
+  flex: none;
+}
+
+.device-avatar svg {
+  width: 20px;
+  height: 20px;
+  fill: none;
+  stroke: var(--el-color-primary);
+  stroke-width: 1.5;
+}
+
+.device-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.device-name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.device-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--el-text-color-placeholder);
+  flex: none;
+}
+
+.device-dot.online {
+  background: var(--el-color-success);
+  box-shadow: 0 0 0 3px var(--el-color-success-light-9, rgba(103, 194, 58, 0.15));
+}
+
+.device-state {
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--el-text-color-secondary);
+}
+
+.device-meta {
+  margin-top: 3px;
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+  font-family: 'SF Mono', 'Cascadia Code', Consolas, monospace;
+}
+
+.device-empty {
+  padding: 14px;
+  border: 1px dashed var(--el-border-color);
+  border-radius: 10px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+  margin-bottom: 12px;
+}
+
+.pair-collapsed {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+/* 配对二维码区 */
+.pair-box {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 12px;
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 10px;
+}
+
+.pair-side {
+  flex: 1;
+  min-width: 0;
+}
+
+.pair-code {
+  font-size: 26px;
+  font-weight: 600;
+  letter-spacing: 6px;
+  font-family: 'SF Mono', 'Cascadia Code', Consolas, monospace;
+}
+
+.pair-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+}
+
+.pair-hint {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+}
+
+.pair-address {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+  font-size: 12px;
+}
+
+.pair-address code {
+  font-family: 'SF Mono', 'Cascadia Code', Consolas, monospace;
+}
+
+/* 投屏模式 */
+.mode-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.mode-item {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 10px;
+}
+
+.mode-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.mode-desc {
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+}
+
+.mode-btn-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.mode-btn {
+  min-width: 110px;
+  margin-left: 0;
+}
+
+/* 画质模式 */
+.quality-block {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 14px;
+}
+
+.quality-label {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+/* 当前投屏会话 */
+.session-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px dashed var(--el-border-color-lighter);
+}
+
+.session-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.session-label {
+  font-size: 13px;
+  color: var(--el-text-color-secondary);
+}
+
+.history-title {
+  margin: 16px 0 8px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+/* 帮助弹窗 */
+.help-list {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 13px;
+  line-height: 1.9;
+}
+
+.help-note {
+  margin: 12px 0 0;
+  font-size: 12px;
+  line-height: 1.7;
+  color: var(--el-text-color-secondary);
 }
 </style>

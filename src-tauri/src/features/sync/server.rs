@@ -44,6 +44,8 @@ async fn record_peer_ip(
         if lock(&state.sync.last_peer_ip).as_deref() != Some(ip.as_str()) {
             *lock(&state.sync.last_peer_ip) = Some(ip);
         }
+        // 在线判定：任何来自手机的请求都刷新最近活跃时间
+        *lock(&state.sync.last_peer_ms) = super::pairing::now_ms();
     }
     next.run(req).await
 }
@@ -87,6 +89,9 @@ pub fn router(
 #[serde(rename_all = "camelCase")]
 struct PairRequest {
     code: String,
+    /// 手机端上报的设备名（如 "Xiaomi 14"），用于设置页展示已配对设备
+    #[serde(default)]
+    device_name: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -157,7 +162,21 @@ async fn pair(
     let token = token.ok_or(StatusCode::INTERNAL_SERVER_ERROR)?;
     // 配对成功即焚：防止同一码被第二台设备使用
     *lock(&s.sync.pairing_code) = None;
-    log::info!("同步配对成功：新设备已接入");
+    // 记录设备名（手机端可能未上报，忽略即可）
+    if let Some(name) = req
+        .device_name
+        .as_deref()
+        .map(str::trim)
+        .filter(|n| !n.is_empty())
+    {
+        *lock(&s.sync.paired_device) = Some(name.to_string());
+        if let Err(e) = super::save_paired_device(&s.app, name) {
+            log::warn!("保存配对设备名称失败: {}", e);
+        }
+        log::info!("同步配对成功：新设备已接入（{}）", name);
+    } else {
+        log::info!("同步配对成功：新设备已接入");
+    }
     Ok(Json(serde_json::json!({
         "token": token,
         "pcName": s.sync.pc_name,

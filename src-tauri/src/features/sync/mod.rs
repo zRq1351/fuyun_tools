@@ -75,6 +75,10 @@ pub struct SyncState {
     last_error: Mutex<Option<String>>,
     /// 最近一次连接的手机 IP（非回环来源），供无线投屏自动预填
     last_peer_ip: Mutex<Option<String>>,
+    /// 已配对设备名称（手机配对时上报，如 "Xiaomi 14"）
+    paired_device: Mutex<Option<String>>,
+    /// 最近一次收到手机请求的时间（毫秒，0 表示从未收到），用于在线判定
+    last_peer_ms: Mutex<i64>,
     pc_name: String,
 }
 
@@ -93,6 +97,8 @@ fn shared() -> &'static Arc<SyncState> {
             shutdown_tx: Mutex::new(None),
             last_error: Mutex::new(None),
             last_peer_ip: Mutex::new(None),
+            paired_device: Mutex::new(None),
+            last_peer_ms: Mutex::new(0),
             pc_name: detect_pc_name(),
         })
     })
@@ -227,6 +233,10 @@ pub fn start(app: &AppHandle, app_state: Arc<Mutex<SharedAppState>>) -> Result<S
     // 2. 令牌：从磁盘恢复或新建
     let token = load_or_create_token(app)?;
     *lock(&state.token) = Some(token);
+    if let Some(name) = load_paired_device(app) {
+        log::info!("已配对设备名称已恢复: {}", name);
+        *lock(&state.paired_device) = Some(name);
+    }
 
     // 3. 生成配对码
     *lock(&state.pairing_code) = Some(pairing::generate_pairing_code());
@@ -316,6 +326,10 @@ pub fn unpair(app: &AppHandle) -> Result<(), String> {
     std::fs::write(&path, &new_token).map_err(|e| format!("保存同步令牌失败: {}", e))?;
     *lock(&state.token) = Some(new_token);
     *lock(&state.pairing_code) = Some(pairing::generate_pairing_code());
+    // 一并清除设备名称与在线记录
+    *lock(&state.paired_device) = None;
+    *lock(&state.last_peer_ms) = 0;
+    clear_paired_device(app);
     log::info!("同步设备已吊销，令牌已轮换，等待重新配对");
     Ok(())
 }
@@ -347,6 +361,12 @@ pub struct SyncStatus {
     pub last_error: Option<String>,
     /// 最近一次连接的手机 WiFi IP（同步连接的来源地址），无线投屏自动预填用
     pub device_ip: Option<String>,
+    /// 已配对设备名称（手机端配对时上报）
+    pub device_name: Option<String>,
+    /// 最近一次收到手机请求的时间（毫秒）
+    pub last_seen_ms: i64,
+    /// 手机是否在线（15 秒内有过请求）
+    pub device_online: bool,
 }
 
 pub fn status() -> SyncStatus {
@@ -363,6 +383,11 @@ fn status_snapshot(state: &SyncState) -> SyncStatus {
     if running && code.as_ref().is_none_or(|c| !c.is_valid(now)) {
         *code = Some(pairing::generate_pairing_code());
     }
+    // 注意：结构体字面量里的临时 guard 会存活到整个语句结束，
+    // 若在字面量内对同一 mutex 加锁两次会死锁 —— 先取值到局部变量
+    let device_name = lock(&state.paired_device).clone();
+    let last_seen_ms = *lock(&state.last_peer_ms);
+
     SyncStatus {
         running,
         port: *lock(&state.port),
@@ -374,6 +399,10 @@ fn status_snapshot(state: &SyncState) -> SyncStatus {
         protocol_version: SYNC_PROTOCOL_VERSION,
         last_error: lock(&state.last_error).clone(),
         device_ip: lock(&state.last_peer_ip).clone(),
+        device_name,
+        last_seen_ms,
+        // 15 秒内有请求视为在线（手机轮询间隔 3 秒，容忍卡顿/切后台）
+        device_online: last_seen_ms > 0 && now.saturating_sub(last_seen_ms) < 15_000,
     }
 }
 
@@ -409,6 +438,36 @@ fn set_enabled_flag(app: &AppHandle, enabled: bool) -> Result<(), String> {
     }
 }
 
+/// 已配对设备名称文件路径
+fn device_file_path(app: &AppHandle) -> Result<std::path::PathBuf, String> {
+    Ok(app_data_dir(app)?.join("sync_device.txt"))
+}
+
+/// 保存配对设备名称（供电脑重启后仍能展示）
+pub fn save_paired_device(app: &AppHandle, name: &str) -> Result<(), String> {
+    let path = device_file_path(app)?;
+    std::fs::write(&path, name.trim()).map_err(|e| format!("保存配对设备名称失败: {}", e))
+}
+
+/// 读取配对设备名称
+pub fn load_paired_device(app: &AppHandle) -> Option<String> {
+    let path = device_file_path(app).ok()?;
+    let text = std::fs::read_to_string(path).ok()?;
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_string())
+    }
+}
+
+/// 删除配对设备名称
+pub fn clear_paired_device(app: &AppHandle) {
+    if let Ok(path) = device_file_path(app) {
+        let _ = std::fs::remove_file(path);
+    }
+}
+
 fn load_or_create_token(app: &AppHandle) -> Result<String, String> {
     let path = token_file_path(app)?;
     if let Ok(existing) = std::fs::read_to_string(&path) {
@@ -441,6 +500,8 @@ mod tests {
             shutdown_tx: Mutex::new(None),
             last_error: Mutex::new(None),
             last_peer_ip: Mutex::new(None),
+            paired_device: Mutex::new(None),
+            last_peer_ms: Mutex::new(0),
             pc_name: "test-pc".to_string(),
         })
     }
