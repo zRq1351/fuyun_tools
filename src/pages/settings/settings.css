@@ -16,12 +16,15 @@ body {
 .el-overlay {
   position: fixed !important;
   z-index: 10000 !important;
+}
+
+/* 仅消息框/确认框强制居中。注意不能把 display:flex 写成通配 .el-overlay：
+   el-dialog 关闭时靠内联 display:none 隐藏，!important 会把它覆盖成 flex，
+   导致已关闭的弹层永久铺满窗口、拦截点击与滚动（2026-11-27 修复） */
+.el-overlay.is-message-box {
   display: flex !important;
   align-items: center !important;
   justify-content: center !important;
-}
-
-.el-overlay.is-message-box {
   z-index: 10000 !important;
 }
 
