@@ -152,6 +152,21 @@
             <svg viewBox="0 0 24 24"><path d="M6 12h12" /></svg>
           </button>
           <button
+            v-if="!isFs"
+            class="btn"
+            :disabled="!connected"
+            title="窗口贴合画面比例（消除留白）"
+            @click="fitWindowToVideo"
+          >
+            <svg viewBox="0 0 24 24"><rect
+              x="4.5"
+              y="4.5"
+              width="15"
+              height="15"
+              rx="2"
+            /><path d="M8 8h5m-5 0v5" /></svg>
+          </button>
+          <button
             class="btn"
             :disabled="!connected"
             :title="`当前：${FIT_LABELS[fitMode]} · 点击切换显示方式`"
@@ -558,6 +573,8 @@ function drawFrame(frame) {
     frameReady.value = true
     waitingLong.value = false
     if (frameWaitTimer) { clearTimeout(frameWaitTimer); frameWaitTimer = null }
+    // 首次出画：画面比例与窗口差得多时自动贴合，避免大片留白
+    autoFitWindowIfNeeded()
   }
 }
 
@@ -909,12 +926,25 @@ async function minimizeWindow() {
  *   全屏后四周都留黑边（2026-11-27 用户反馈「全屏不是全屏」）
  * - contain：等比缩放到完整可见；cover：等比放大到铺满，溢出部分裁掉
  */
+let fitRaf = 0
+
 function applyFit() {
+  // 合并同一帧内的多次调用（拖动窗口时 ResizeObserver 会连发）
+  if (fitRaf) return
+  fitRaf = requestAnimationFrame(() => {
+    fitRaf = 0
+    applyFitNow()
+  })
+}
+
+function applyFitNow() {
   const canvas = canvasRef.value
   const stage = stageRef.value
   if (!canvas || !stage || !canvas.width || !canvas.height) return
-  const boxW = stage.clientWidth
-  const boxH = stage.clientHeight
+  // 设备外框（8px padding + 1px 边框）要扣掉，否则 contain 时边缘被裁
+  const frame = fitMode.value === 'contain' ? 18 : 0
+  const boxW = Math.max(0, stage.clientWidth - frame)
+  const boxH = Math.max(0, stage.clientHeight - frame)
   if (!boxW || !boxH) return
   if (fitMode.value === 'fill') {
     // 拉伸：填满容器，比例可能变形，但不裁剪
@@ -982,6 +1012,53 @@ function onMouseMove(event) {
 }
 
 // ---- 窗口随视频方向横竖切换 ----
+/**
+ * 把窗口调整成与手机画面一致的比例（窗口化模式），消除大面积留白。
+ * 以当前内容区高度为基准算宽度；超出屏幕可用区域时按宽度反推高度。
+ */
+async function fitWindowToVideo() {
+  if (!videoW || !videoH || isFs.value) return
+  const stage = stageRef.value
+  if (!stage) return
+  const win = getCurrentWindow()
+  try {
+    const scale = await win.scaleFactor()
+    const size = await win.innerSize()
+    const innerW = size.width / scale
+    const innerH = size.height / scale
+    const extraW = Math.max(0, innerW - stage.clientWidth)
+    const extraH = Math.max(0, innerH - stage.clientHeight)
+    const aspect = videoW / videoH
+    const availW = window.screen.availWidth * 0.95
+    const availH = window.screen.availHeight * 0.95
+    let h = stage.clientHeight || innerH - extraH
+    let w = h * aspect
+    if (w + extraW > availW) {
+      w = Math.max(240, availW - extraW)
+      h = w / aspect
+    }
+    if (h + extraH > availH) {
+      h = Math.max(240, availH - extraH)
+      w = h * aspect
+    }
+    await win.setSize(new LogicalSize(Math.round(w + extraW), Math.round(h + extraH)))
+    lastFitKey = ''
+    applyFitNow()
+  } catch { /* 窗口操作失败不影响画面 */ }
+}
+
+/** 画面与窗口比例差得多时自动贴合一次（首次出画/旋转后） */
+async function autoFitWindowIfNeeded() {
+  const stage = stageRef.value
+  if (!videoW || !videoH || !stage || isFs.value) return
+  if (localStorage.getItem('fuyun-mirror-autofit') === '0') return
+  const videoAspect = videoW / videoH
+  const stageAspect = stage.clientWidth / Math.max(1, stage.clientHeight)
+  if (Math.abs(videoAspect - stageAspect) / videoAspect > 0.12) {
+    await fitWindowToVideo()
+  }
+}
+
 async function syncWindowOrientation() {
   if (!videoW || !videoH) return
   const wantLandscape = videoW > videoH
@@ -997,6 +1074,8 @@ async function syncWindowOrientation() {
       const w = Math.max(288, Math.round(curH))
       const h = Math.max(288, Math.round(curW))
       await win.setSize(new LogicalSize(w, h))
+      // 旋转后按新比例再贴合一次，避免留白
+      await fitWindowToVideo()
     }
   } catch { /* 窗口操作失败不影响画面 */ }
 }
@@ -1518,353 +1597,4 @@ window.addEventListener('pagehide', cleanup)
   height: 30px;
   background: var(--btn-bg);
   color: var(--btn-text);
-  border: 1px solid var(--btn-border);
-  border-radius: 8px;
-  cursor: pointer;
-  transition: background 0.15s, color 0.15s, border-color 0.15s;
-}
-
-.btn svg {
-  width: 16px;
-  height: 16px;
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 1.8;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-}
-
-.btn:hover:not(:disabled) {
-  background: var(--btn-hover-bg);
-  color: var(--text);
-  border-color: var(--btn-hover-border);
-}
-
-.btn:active:not(:disabled) {
-  transform: translateY(1px);
-}
-
-.btn:disabled {
-  opacity: 0.35;
-  cursor: default;
-}
-
-/* 全屏（铺满屏幕）：工具栏滑出隐藏，画面去 bezel 填满 */
-.mirror-page.fullscreen .toolbar {
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  z-index: 10;
-  transform: translateY(-110%);
-  transition: transform 0.2s ease;
-}
-
-.mirror-page.fullscreen.bar-show .toolbar {
-  transform: none;
-}
-
-.mirror-page.fullscreen .device {
-  padding: 0;
-  border: none;
-  border-radius: 0;
-  box-shadow: none;
-}
-
-.mirror-page.fullscreen .screen {
-  max-width: 100vw;
-  max-height: 100vh;
-  border-radius: 0;
-}
-
-/* 铺满模式：去掉设备外框，画布按容器 cover 缩放，超出部分由 stage 裁剪 */
-.mirror-page.no-frame .device {
-  padding: 0;
-  border: none;
-  border-radius: 0;
-  box-shadow: none;
-  overflow: hidden;
-}
-
-.mirror-page.hide-cursor,
-.mirror-page.hide-cursor * {
-  cursor: none !important;
-}
-
-.mirror-page.no-frame .screen {
-  border-radius: 0;
-}
-
-.stage {
-  flex: 1;
-  position: relative;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  overflow: hidden;
-}
-
-.device {
-  display: none;
-  padding: 8px;
-  border-radius: 22px;
-  background: #05070a;
-  border: 1px solid var(--panel-border);
-  box-shadow:
-    0 0 0 1px rgba(255, 255, 255, 0.04) inset,
-    0 18px 50px rgba(0, 0, 0, 0.55),
-    0 4px 16px rgba(0, 0, 0, 0.4);
-}
-
-.device.live {
-  display: block;
-}
-
-.screen {
-  display: block;
-  background: #000;
-  cursor: pointer;
-  touch-action: none;
-  border-radius: 14px;
-}
-
-.placeholder {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 14px;
-  color: var(--muted);
-  font-size: 14px;
-  padding: 0 24px;
-  text-align: center;
-  line-height: 1.6;
-}
-
-.placeholder-icon svg {
-  width: 44px;
-  height: 44px;
-  fill: none;
-  stroke: var(--muted);
-  stroke-width: 1.6;
-  stroke-linecap: round;
-  opacity: 0.6;
-}
-
-/* 加载态：旋转环 + 文案（首帧出来前的过渡，避免黑屏被误判为失败） */
-.loading-ring {
-  width: 38px;
-  height: 38px;
-  border-radius: 50%;
-  border: 3px solid rgba(255, 255, 255, 0.14);
-  border-top-color: var(--accent, #35bf6c);
-  animation: mirror-spin 0.9s linear infinite;
-}
-
-@keyframes mirror-spin {
-  to { transform: rotate(360deg); }
-}
-
-.loading-text {
-  color: var(--text);
-  font-size: 14px;
-}
-
-.loading-hint {
-  max-width: 320px;
-  font-size: 12px;
-  line-height: 1.7;
-  color: var(--muted);
-  opacity: 0.85;
-}
-
-/* 键盘/IME 捕获输入框：不可见但保持焦点（需真实尺寸否则部分 IME 不附着） */
-.kbd-capture {
-  position: fixed;
-  top: 0;
-  left: 0;
-  width: 40px;
-  height: 20px;
-  opacity: 0.01;
-  border: none;
-  padding: 0;
-  pointer-events: none;
-  z-index: -1;
-}
-
-/* 拖文件悬停提示 */
-.drag-overlay {
-  position: absolute;
-  inset: 0;
-  z-index: 20;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: rgba(10, 30, 20, 0.55);
-  color: #fff;
-  font-size: 18px;
-  letter-spacing: 2px;
-  pointer-events: none;
-  border: 2px dashed var(--accent);
-  border-radius: 14px;
-}
-
-/* 操作提示 toast */
-.toast {
-  position: absolute;
-  bottom: 18px;
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: 30;
-  max-width: 80%;
-  padding: 8px 16px;
-  border-radius: 8px;
-  background: rgba(15, 22, 28, 0.92);
-  color: #dfe5ec;
-  font-size: 13px;
-  border: 1px solid #2a323c;
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-/* 从手机导出文件面板 */
-.export-backdrop {
-  position: fixed;
-  inset: 0;
-  z-index: 50;
-  background: rgba(0, 0, 0, 0.45);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.export-panel {
-  width: 88%;
-  max-height: 82%;
-  display: flex;
-  flex-direction: column;
-  background: var(--pill-bg);
-  border: 1px solid var(--pill-border);
-  border-radius: 12px;
-  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.5);
-  overflow: hidden;
-}
-
-.export-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 10px 14px;
-  border-bottom: 1px solid var(--pill-border);
-}
-
-.export-title {
-  font-size: 14px;
-  color: var(--text);
-}
-
-.export-tip {
-  padding: 8px 8px 0;
-  font-size: 11px;
-  color: var(--muted);
-}
-
-.export-list {
-  flex: 1;
-  overflow-y: auto;
-  padding: 6px 8px;
-}
-
-.export-dir {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 8px 8px 4px;
-  font-size: 12px;
-  color: var(--muted);
-  font-family: Consolas, monospace;
-}
-
-.sel-all {
-  cursor: pointer;
-  color: var(--accent);
-}
-
-.sel-all:hover {
-  text-decoration: underline;
-}
-
-.export-item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 5px 8px;
-  border-radius: 6px;
-  cursor: pointer;
-  font-size: 13px;
-  color: var(--text);
-  user-select: none;
-}
-
-.export-item:hover {
-  background: var(--btn-hover-bg);
-}
-
-.export-item .fname {
-  flex: 1;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.export-item .fsize {
-  flex: 0 0 auto;
-  color: var(--muted);
-  font-size: 11px;
-  font-family: Consolas, monospace;
-}
-
-.export-empty {
-  padding: 14px 10px;
-  color: var(--muted);
-  font-size: 12px;
-  text-align: center;
-}
-
-.export-foot {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 10px 14px;
-  border-top: 1px solid var(--pill-border);
-}
-
-.sel-count {
-  flex: 1;
-  font-size: 12px;
-  color: var(--muted);
-}
-
-.btn.primary {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: #08130c;
-  width: auto;
-  padding: 0 14px;
-  font-size: 13px;
-}
-
-.btn.primary:hover:not(:disabled) {
-  background: var(--accent);
-  color: #08130c;
-  opacity: 0.9;
-}
-
-.btn.primary:disabled {
-  opacity: 0.4;
-}
-</style>
+  border: 1p
