@@ -53,11 +53,11 @@
         </el-button>
       </div>
 
-      <!-- ===== 剪贴板同步 ===== -->
+      <!-- ===== 设备授权：一次扫码授权「剪贴板同步 + 投屏」两个能力 ===== -->
       <div class="section-card">
         <div class="section-head">
           <div class="section-title">
-            剪贴板同步
+            设备授权
           </div>
           <div class="section-head-actions">
             <el-button
@@ -67,15 +67,10 @@
             >
               使用帮助
             </el-button>
-            <el-switch
-              v-model="enabled"
-              :loading="switching"
-              @change="onToggle"
-            />
           </div>
         </div>
 
-        <!-- 已配对设备（手机型号 / IP / 在线状态 / 最近活跃） -->
+        <!-- 已授权设备（手机型号 / IP / 在线状态 / 能力标签） -->
         <div
           v-if="status.paired"
           class="device-row"
@@ -104,14 +99,13 @@
                 · 最近活跃 {{ lastSeenLabel(status.lastSeenMs) }}
               </template>
             </div>
-            <!-- 扫码授权后可分别启用：剪贴板同步 / 投屏 -->
             <div class="cap-row">
               <el-tag
                 size="small"
-                type="success"
+                :type="status.running ? 'success' : 'info'"
                 effect="plain"
               >
-                剪贴板同步 · 已授权
+                剪贴板同步 · {{ status.running ? '服务已开' : '服务已关' }}
               </el-tag>
               <el-tag
                 size="small"
@@ -128,17 +122,17 @@
             plain
             @click="onUnpair"
           >
-            吊销设备
+            吊销授权
           </el-button>
         </div>
         <div
           v-else
           class="device-empty"
         >
-          尚未配对 — 手机打开「浮云剪贴板」扫描下方二维码即可自动完成配对
+          还没有手机获得授权 — 用手机「浮云剪贴板」扫描下方二维码即可授权
         </div>
 
-        <!-- 配对二维码 -->
+        <!-- 授权二维码 -->
         <template v-if="status.running">
           <div
             v-if="!status.paired || showPairBox"
@@ -148,7 +142,7 @@
               v-if="pairQr"
               class="pairing-qr"
               :src="pairQr"
-              alt="配对二维码"
+              alt="授权二维码"
             >
             <div class="pair-side">
               <div class="pair-code">
@@ -168,7 +162,7 @@
                 </el-button>
               </div>
               <div class="pair-hint">
-                手机扫码即自动完成配对
+                手机扫码即完成授权，无需输入配对码
               </div>
               <div
                 v-if="address"
@@ -189,13 +183,13 @@
             v-else
             class="device-empty pair-collapsed"
           >
-            要连接新手机？
+            要授权新手机？
             <el-button
               size="small"
               text
               @click="showPairBox = true"
             >
-              显示配对二维码
+              显示授权二维码
             </el-button>
           </div>
         </template>
@@ -203,7 +197,45 @@
           v-else
           class="device-empty"
         >
-          打开上方开关启动同步服务后显示配对二维码
+          打开下方「剪贴板同步」开关后显示授权二维码
+        </div>
+
+        <p class="auth-note">
+          一次扫码完成授权；之后在手机 App「设备能力」里分别开启
+          <b>剪贴板同步</b> 与 <b>投屏</b>，两个能力互不影响。
+        </p>
+      </div>
+
+      <!-- ===== 剪贴板同步（服务本身，不含授权） ===== -->
+      <div class="section-card">
+        <div class="section-head">
+          <div class="section-title">
+            剪贴板同步
+          </div>
+          <div class="section-head-actions">
+            <span
+              class="service-state"
+              :class="{ on: status.running }"
+            >{{ status.running ? '服务运行中' : '服务已停止' }}</span>
+            <el-switch
+              v-model="enabled"
+              :loading="switching"
+              @change="onToggle"
+            />
+          </div>
+        </div>
+        <div class="service-meta">
+          <template v-if="status.running">
+            <span>{{ status.pcName }} · 端口 {{ status.port }}</span>
+            <span
+              v-if="address"
+              class="service-addr"
+            >{{ address }}</span>
+          </template>
+          <span v-else>开启后，手机与电脑同一 Wi-Fi 即可同步（文本与图片）</span>
+        </div>
+        <div class="service-tip">
+          实时接收由手机端「设备能力 → 剪贴板同步」开关控制。
         </div>
       </div>
 
@@ -1421,6 +1453,41 @@ onUnmounted(() => {
   margin: 12px 0 0;
   font-size: 12px;
   line-height: 1.7;
+  color: var(--el-text-color-secondary);
+}
+
+.auth-note {
+  margin: 12px 0 0;
+  font-size: 12px;
+  line-height: 1.7;
+  color: var(--el-text-color-secondary);
+}
+
+.service-state {
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+}
+
+.service-state.on {
+  color: var(--el-color-success);
+}
+
+.service-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+}
+
+.service-addr {
+  font-family: 'SF Mono', 'Cascadia Code', Consolas, monospace;
+}
+
+.service-tip {
+  margin-top: 6px;
+  font-size: 12px;
   color: var(--el-text-color-secondary);
 }
 </style>
