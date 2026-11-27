@@ -224,6 +224,13 @@
           </div>
         </div>
 
+        <div
+          v-if="mirrorLocked"
+          class="auth-hint"
+        >
+          手机尚未授权投屏 — 请在手机 App「设备能力」中打开「投屏」开关（首次需先扫码授权）
+        </div>
+
         <div class="mode-grid">
           <div class="mode-item">
             <div class="mode-title">
@@ -241,6 +248,7 @@
             <el-button
               class="mode-btn"
               type="primary"
+              :disabled="mirrorLocked"
               :loading="mirrorStarting"
               @click="onStartMirror"
             >
@@ -259,6 +267,7 @@
                 class="mode-btn"
                 type="primary"
                 plain
+                :disabled="mirrorLocked"
                 :loading="wirelessStarting"
                 @click="onEnableWireless"
               >
@@ -266,6 +275,7 @@
               </el-button>
               <el-button
                 class="mode-btn"
+                :disabled="mirrorLocked"
                 :loading="wirelessConnecting"
                 @click="onConnectWireless"
               >
@@ -458,6 +468,8 @@ const mirrorHelpOpen = ref(false)
 const showPairBox = ref(false)
 // 当前投屏会话（用于「停止投屏/注销」）
 const mirrorSession = ref({running: false, deviceName: ''})
+// 已配对但手机未打开「投屏」开关时，电脑端不可发起投屏（纯 adb 场景不受限）
+const mirrorLocked = computed(() => status.running && status.paired && !status.mirrorAuthorized)
 const mirrorStopping = ref(false)
 let mirrorTimer = null
 
@@ -1305,6 +1317,17 @@ onUnmounted(() => {
 }
 
 /* 投屏模式 */
+.auth-hint {
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--el-color-warning-dark-2, #b88230);
+  background: var(--el-color-warning-light-9, rgba(230, 162, 60, 0.1));
+  border: 1px solid var(--el-color-warning-light-7, rgba(230, 162, 60, 0.25));
+  border-radius: 8px;
+}
+
 .mode-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

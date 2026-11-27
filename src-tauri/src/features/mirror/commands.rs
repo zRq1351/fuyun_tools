@@ -107,6 +107,11 @@ pub async fn mirror_start(
         super::window::show_mirror_window(&app)?;
         return Ok(info);
     }
+    // 授权校验：仅在「需要新建会话」时生效；已运行会话的复用/重连不受影响
+    if switch_from.is_none() {
+        crate::features::sync::mirror_start_guard()?;
+    }
+
     if let Some(from) = switch_from {
         log::info!("[mirror] 切换设备: {} -> {:?}", from, serial);
         stop_session(&app);

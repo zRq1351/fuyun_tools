@@ -377,6 +377,24 @@ pub struct SyncStatus {
     pub mirror_authorized: bool,
 }
 
+/// 投屏启动前置检查：仅在「同步服务运行且已配对手机」时要求授权。
+/// 未运行同步服务或尚未配对（纯 adb 使用、无 App 参与）不受限制。
+pub fn mirror_start_guard() -> Result<(), String> {
+    let state = shared();
+    if !state.running.load(Ordering::SeqCst) {
+        return Ok(());
+    }
+    let paired = lock(&state.token).is_some();
+    if !paired {
+        return Ok(());
+    }
+    if *lock(&state.mirror_authorized) {
+        Ok(())
+    } else {
+        Err("手机端未授权投屏：请在手机 App「设备能力 → 投屏」中打开开关".to_string())
+    }
+}
+
 pub fn status() -> SyncStatus {
     status_snapshot(shared())
 }
