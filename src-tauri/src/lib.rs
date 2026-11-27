@@ -195,6 +195,37 @@ fn cleanup_stale_recording_tmp_files() {
 }
 
 /// 运行Tauri应用程序
+/// 确保开机自启动的注册项携带 --autostart 参数（兼容旧版本的注册项）。
+/// 仅执行一次，完成后写入标记文件。
+fn ensure_autostart_arg(app: &tauri::AppHandle) {
+    use tauri_plugin_autostart::ManagerExt as _;
+    let Ok(dir) = app.path().app_data_dir() else {
+        return;
+    };
+    let marker = dir.join("autostart_arg_migrated");
+    if marker.exists() {
+        return;
+    }
+    let mgr = app.autolaunch();
+    match mgr.is_enabled() {
+        Ok(true) => {
+            // 先禁用再启用，让插件按新参数重写注册项
+            if let Err(e) = mgr.disable() {
+                log::warn!("重写自启动注册项失败（disable）: {}", e);
+                return;
+            }
+            match mgr.enable() {
+                Ok(()) => log::info!("自启动注册项已更新为携带 --autostart"),
+                Err(e) => log::warn!("重写自启动注册项失败（enable）: {}", e),
+            }
+        }
+        Ok(false) => {}
+        Err(e) => log::warn!("读取自启动状态失败: {}", e),
+    }
+    let _ = std::fs::create_dir_all(&dir);
+    let _ = std::fs::write(&marker, "1");
+}
+
 pub fn run() {
     install_global_panic_hook();
     // 启动时清理遗留临时文件（后台线程，不阻塞启动流程）
@@ -212,10 +243,14 @@ pub fn run() {
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
-            // 已有实例运行时启动新实例：聚焦主设置窗口并提示
-            log::info!("检测到已运行的实例，聚焦设置窗口并退出新实例");
+            // 已在托盘运行 → 用户又双击了图标：展示设置页（含从托盘隐藏/最小化的场景）
+            log::info!("检测到已运行的实例，展示设置窗口");
+            let handle = app.clone();
+            if let Err(e) = show_standard_window_by_label(&handle, "settings") {
+                log::warn!("展示设置窗口失败: {}", e);
+            }
             if let Some(window) = app.get_webview_window("settings") {
-                let _ = window.show();
+                let _ = window.unminimize();
                 let _ = window.set_focus();
             }
         }))
@@ -234,6 +269,15 @@ pub fn run() {
 
             let app_handle = app.handle();
             rebuild_tray_menu(app_handle, state_arc.clone());
+            // 旧版本的自启动注册项没有 --autostart 参数：重写一次，保证下次开机启动可被识别
+            ensure_autostart_arg(app_handle);
+            // 双击图标启动 → 直接展示设置页；开机自启动 → 仅驻留托盘
+            let launched_by_autostart = std::env::args().any(|a| a == "--autostart");
+            if launched_by_autostart {
+                log::info!("开机自启动：仅驻留托盘，不展示设置页");
+            } else if let Err(e) = show_standard_window_by_label(app_handle, "settings") {
+                log::warn!("启动时展示设置页失败: {}", e);
+            }
             start_auto_backup_scheduler(app_handle.clone(), state_arc.clone());
             crate::ui::window_manager::start_idle_window_gc(app_handle.clone());
             // 上次退出前开启过手机同步 → 随应用启动自动恢复（不再依赖打开设置页）
@@ -835,7 +879,13 @@ pub fn run() {
             set_locale,
         ])
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
-        .plugin(tauri_plugin_autostart::Builder::new().build());
+        // 开机自启动时带上 --autostart，用于区分「双击启动」与「开机启动」：
+        // 双击 → 展示设置页；开机 → 只驻留托盘
+        .plugin(
+            tauri_plugin_autostart::Builder::new()
+                .arg("--autostart")
+                .build(),
+        );
 
     // 开发与发布版均注册日志插件并落盘，保证线上问题可诊断；
     // 是否写入由设置 logging_enabled 控制（已在启动时初始化，运行期切换即时生效）
