@@ -1,7 +1,7 @@
 <template>
   <div
     class="mirror-page"
-    :class="[theme, { fullscreen: isFs, 'bar-show': barShow }]"
+    :class="[theme, { fullscreen: isFs, 'bar-show': barShow, cover: fitMode === 'cover' }]"
     @mousemove="onMouseMove"
   >
     <div
@@ -150,6 +150,21 @@
             @click="minimizeWindow"
           >
             <svg viewBox="0 0 24 24"><path d="M6 12h12" /></svg>
+          </button>
+          <button
+            class="btn"
+            :disabled="!connected"
+            :title="fitMode === 'cover' ? '铺满（裁剪边缘）· 点击改为适应' : '适应窗口 · 点击改为铺满'"
+            @click="toggleFitMode"
+          >
+            <svg
+              v-if="fitMode === 'contain'"
+              viewBox="0 0 24 24"
+            ><path d="M4 8V5.5A1.5 1.5 0 0 1 5.5 4H8M16 4h2.5A1.5 1.5 0 0 1 20 5.5V8M20 16v2.5a1.5 1.5 0 0 1-1.5 1.5H16M8 20H5.5A1.5 1.5 0 0 1 4 18.5V16" /></svg>
+            <svg
+              v-else
+              viewBox="0 0 24 24"
+            ><path d="M4 4h6v2H6v4H4V4zM20 4v6h-2V6h-4V4h6zM4 20v-6h2v4h4v2H4zM20 20h-6v-2h4v-4h2v6z" /></svg>
           </button>
           <button
             class="btn"
@@ -362,6 +377,9 @@ const waitingLong = ref(false)
 let frameWaitTimer = null
 const statusText = ref('未连接')
 const isFs = ref(false)
+// 画面铺放方式：contain = 适应窗口（保持比例、可能留边），cover = 铺满（裁剪边缘）
+const fitMode = ref(localStorage.getItem('fuyun-mirror-fit') === 'cover' ? 'cover' : 'contain')
+let lastFitKey = ''
 const barShow = ref(true)
 const dragging = ref(false)
 const toastMsg = ref('')
@@ -488,6 +506,12 @@ function drawFrame(frame) {
   const ctx = canvas.getContext('2d')
   ctx.drawImage(frame, 0, 0, frame.displayWidth, frame.displayHeight)
   frame.close()
+  // 分辨率/容器/铺放方式变化时重新计算显示尺寸
+  const fitKey = `${canvas.width}x${canvas.height}|${fitMode.value}`
+  if (fitKey !== lastFitKey) {
+    lastFitKey = fitKey
+    applyFit()
+  }
   if (!frameReady.value) {
     frameReady.value = true
     waitingLong.value = false
@@ -835,6 +859,43 @@ async function closeWindow() {
 
 async function minimizeWindow() {
   try { await getCurrentWindow().minimize() } catch { /* ignore */ }
+}
+
+/**
+ * 按容器实际尺寸缩放画布：
+ * - 之前只靠 CSS max-width/max-height 约束，画布永远停在原始像素附近，
+ *   全屏后四周都留黑边（2026-11-27 用户反馈「全屏不是全屏」）
+ * - contain：等比缩放到完整可见；cover：等比放大到铺满，溢出部分裁掉
+ */
+function applyFit() {
+  const canvas = canvasRef.value
+  const stage = stageRef.value
+  if (!canvas || !stage || !canvas.width || !canvas.height) return
+  const boxW = stage.clientWidth
+  const boxH = stage.clientHeight
+  if (!boxW || !boxH) return
+  const scale =
+    fitMode.value === 'cover'
+      ? Math.max(boxW / canvas.width, boxH / canvas.height)
+      : Math.min(boxW / canvas.width, boxH / canvas.height)
+  const w = Math.round(canvas.width * scale)
+  const h = Math.round(canvas.height * scale)
+  canvas.style.width = `${w}px`
+  canvas.style.height = `${h}px`
+}
+
+function onWindowResize() {
+  lastFitKey = ''
+  applyFit()
+}
+
+window.addEventListener('resize', onWindowResize)
+
+function toggleFitMode() {
+  fitMode.value = fitMode.value === 'cover' ? 'contain' : 'cover'
+  localStorage.setItem('fuyun-mirror-fit', fitMode.value)
+  lastFitKey = ''
+  applyFit()
 }
 
 // 最大化键语义：在「铺满屏幕」（真全屏）与窗口化之间切换
@@ -1431,6 +1492,19 @@ onUnmounted(() => {
 .mirror-page.fullscreen .screen {
   max-width: 100vw;
   max-height: 100vh;
+  border-radius: 0;
+}
+
+/* 铺满模式：去掉设备外框，画布按容器 cover 缩放，超出部分由 stage 裁剪 */
+.mirror-page.cover .device {
+  padding: 0;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+  overflow: hidden;
+}
+
+.mirror-page.cover .screen {
   border-radius: 0;
 }
 
