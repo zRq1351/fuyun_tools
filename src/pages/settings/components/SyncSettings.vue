@@ -104,6 +104,23 @@
                 · 最近活跃 {{ lastSeenLabel(status.lastSeenMs) }}
               </template>
             </div>
+            <!-- 扫码授权后可分别启用：剪贴板同步 / 投屏 -->
+            <div class="cap-row">
+              <el-tag
+                size="small"
+                type="success"
+                effect="plain"
+              >
+                剪贴板同步 · 已授权
+              </el-tag>
+              <el-tag
+                size="small"
+                :type="status.mirrorAuthorized ? 'success' : 'info'"
+                effect="plain"
+              >
+                投屏 · {{ status.mirrorAuthorized ? '已授权' : '未授权' }}
+              </el-tag>
+            </div>
           </div>
           <el-button
             size="small"
@@ -1204,6 +1221,13 @@ onUnmounted(() => {
   font-size: 12px;
   font-weight: 400;
   color: var(--el-text-color-secondary);
+}
+
+.cap-row {
+  display: flex;
+  gap: 6px;
+  margin-top: 6px;
+  flex-wrap: wrap;
 }
 
 .device-meta {

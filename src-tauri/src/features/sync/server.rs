@@ -66,6 +66,7 @@ pub fn router(
         .route("/api/ws", get(ws_handler))
         // 手机 App「投屏到电脑」远程入口（与剪贴板同步共用认证）
         .route("/api/mirror/start", post(mirror_start_route))
+        .route("/api/mirror/authorize", post(mirror_authorize_route))
         .route("/api/mirror/status", get(mirror_status_route))
         .layer(axum::extract::DefaultBodyLimit::max(32 * 1024 * 1024))
         .layer(axum::middleware::from_fn_with_state(
@@ -84,6 +85,13 @@ pub fn router(
 }
 
 // ---------- 请求/响应结构 ----------
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct MirrorAuthRequest {
+    /// true = 允许电脑投屏；false = 撤销授权
+    enabled: bool,
+}
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -222,17 +230,48 @@ async fn push_clip(
     Ok(Json(serde_json::json!({ "ok": true })))
 }
 
-/// 手机 → PC：远程开启投屏（手机 App「投屏到电脑」入口，与剪贴板同步共用令牌认证）。
-/// 统一返回 200 + ok 标记，业务错误放 error 字段，方便手机端提示。
-async fn mirror_start_route(
+/// 手机 → PC：设置投屏授权开关（扫码授权后可分别勾选同步 / 投屏）。
+async fn mirror_authorize_route(
     State(s): State<ServerState>,
     headers: HeaderMap,
+    Json(req): Json<MirrorAuthRequest>,
 ) -> Json<serde_json::Value> {
     let token = request_token(&headers, None);
     if check_token(&s.sync, &token).is_err() {
         return Json(serde_json::json!({ "ok": false, "error": "认证失败，请重新配对" }));
     }
-    log::info!("[sync] 手机远程请求开启投屏");
+    *lock(&s.sync.mirror_authorized) = req.enabled;
+    if let Err(e) = super::save_mirror_authorized(&s.app, req.enabled) {
+        log::warn!("保存投屏授权状态失败: {}", e);
+    }
+    log::info!("投屏授权已{}", if req.enabled { "开启" } else { "撤销" });
+    Json(serde_json::json!({ "ok": true, "authorized": req.enabled }))
+}
+
+/// 手机 → PC：远程开启投屏（手机 App「投屏到电脑」入口）。
+/// **不要求配对**：剪贴板同步与投屏互不干扰，未配对手机也能触发投屏；
+/// 已配对时沿用令牌认证仅用于日志区分。统一返回 200 + ok 标记。
+async fn mirror_start_route(
+    State(s): State<ServerState>,
+    headers: HeaderMap,
+) -> Json<serde_json::Value> {
+    let token = request_token(&headers, None);
+    let token_ok = check_token(&s.sync, &token).is_ok();
+    // 投屏需要显式授权：已配对令牌 或 手机端已打开「投屏」开关
+    if !token_ok && !*lock(&s.sync.mirror_authorized) {
+        log::warn!("[sync] 未授权设备请求开启投屏，已拒绝");
+        return Json(
+            serde_json::json!({ "ok": false, "error": "手机未授权投屏，请先在 App 中扫码授权" }),
+        );
+    }
+    log::info!(
+        "[sync] 请求开启投屏（{}）",
+        if token_ok {
+            "已配对手机"
+        } else {
+            "仅投屏授权"
+        }
+    );
     match crate::features::mirror::commands::mirror_start(s.app.clone(), None, None).await {
         Ok(info) => Json(serde_json::json!({
             "ok": true,
@@ -246,17 +285,23 @@ async fn mirror_start_route(
     }
 }
 
-/// 手机 → PC：查询投屏会话状态（App 主页展示用）。需令牌认证。
+/// 手机 → PC：查询投屏会话状态（App 主页/发现页展示用）。**不要求配对**。
 async fn mirror_status_route(
     State(s): State<ServerState>,
     headers: HeaderMap,
 ) -> Json<serde_json::Value> {
     let token = request_token(&headers, None);
-    if check_token(&s.sync, &token).is_err() {
-        return Json(serde_json::json!({ "ok": false, "error": "认证失败，请重新配对" }));
-    }
+    let _ = check_token(&s.sync, &token); // 令牌仅用于区分来源，不阻断
     match crate::features::mirror::commands::mirror_status(s.app.clone()).await {
-        Ok(v) => Json(v),
+        Ok(mut v) => {
+            if let Some(obj) = v.as_object_mut() {
+                obj.insert(
+                    "authorized".to_string(),
+                    serde_json::Value::Bool(*lock(&s.sync.mirror_authorized)),
+                );
+            }
+            Json(v)
+        }
         Err(e) => Json(serde_json::json!({ "ok": false, "error": e })),
     }
 }
