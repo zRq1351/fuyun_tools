@@ -274,6 +274,15 @@ async fn mirror_authorize_route(
         log::warn!("保存投屏授权状态失败: {}", e);
     }
     log::info!("投屏授权已{}", if req.enabled { "开启" } else { "撤销" });
+    // 真拦截：撤销授权时立刻停掉正在运行的投屏会话
+    if !req.enabled {
+        let app = s.app.clone();
+        tauri::async_runtime::spawn(async move {
+            if let Err(e) = crate::features::mirror::commands::mirror_stop(app).await {
+                log::warn!("撤销投屏授权时停止会话失败: {}", e);
+            }
+        });
+    }
     Json(serde_json::json!({ "ok": true, "authorized": req.enabled }))
 }
 

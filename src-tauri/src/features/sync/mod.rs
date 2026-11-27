@@ -377,21 +377,18 @@ pub struct SyncStatus {
     pub mirror_authorized: bool,
 }
 
-/// 投屏启动前置检查：仅在「同步服务运行且已配对手机」时要求授权。
-/// 未运行同步服务或尚未配对（纯 adb 使用、无 App 参与）不受限制。
+/// 投屏授权硬拦截：只要存在已配对设备（token 存在）就必须已授权投屏。
+/// 唯一例外是「从未使用手机 App 的纯 adb 场景」（无配对令牌），此时不存在能力开关可言。
+/// 注意：无条件校验，不看同步服务是否运行——授权是一次性的设备信任，与通道状态解耦。
 pub fn mirror_start_guard() -> Result<(), String> {
     let state = shared();
-    if !state.running.load(Ordering::SeqCst) {
-        return Ok(());
-    }
-    let paired = lock(&state.token).is_some();
-    if !paired {
+    if lock(&state.token).is_none() {
         return Ok(());
     }
     if *lock(&state.mirror_authorized) {
         Ok(())
     } else {
-        Err("手机端未授权投屏：请在手机 App「设备能力 → 投屏」中打开开关".to_string())
+        Err("投屏已被手机端关闭：请在手机 App「设备能力 → 投屏」中打开开关".to_string())
     }
 }
 

@@ -103,8 +103,8 @@
       "backupDesc": "导出备份包、恢复预览与自动备份配置",
       "diagnostic": "诊断与修复",
       "diagnosticDesc": "查看核心健康状态并执行诊断动作",
-      "sync": "手机同步",
-      "syncDesc": "与手机互相同步剪贴板内容",
+      "sync": "手机连接",
+      "syncDesc": "管理剪贴板同步与投屏两条通道",
       "developer": "开发者",
       "developerDesc": "开发调试信息与存储占用监控",
       "about": "关于",
@@ -363,7 +363,7 @@
       "autoBackupFailed": "自动备份失败：{error}"
     },
     "sync": {
-      "title": "手机同步",
+      "title": "手机连接",
       "enable": "启动同步服务",
       "enableHint": "启动后，手机与电脑可在同一局域网下互相同步剪贴板内容",
       "disable": "停止同步服务",
@@ -393,9 +393,9 @@
       "confirmTitle": "提示",
       "expiresIn": "{secs} 秒后过期",
       "codeExpired": "配对码已过期，请重新生成",
-      "moduleTitle": "手机功能",
-      "moduleHint": "开启后可使用剪贴板同步与手机投屏；关闭将停止同步服务，投屏入口一并隐藏。",
-      "moduleDisabledHint": "手机功能已关闭。打开上方开关即可使用剪贴板同步与手机投屏。",
+      "moduleTitle": "手机连接",
+      "moduleHint": "通道管理：剪贴板同步走 Wi-Fi（需手机 App），投屏走 USB / 无线调试（无需 App）。关闭将停止同步服务并收起本页通道设置，已建立的投屏会话不受影响。",
+      "moduleDisabledHint": "手机连接已关闭。打开上方开关即可管理剪贴板同步与投屏通道。",
       "mirrorTitle": "手机投屏",
       "syncTitle": "剪贴板同步"
     },
@@ -534,7 +534,7 @@
       "selectionEnabled": "划词",
       "launcherEnabled": "启动器",
       "docManagerEnabled": "文档管理",
-      "phoneEnabled": "手机同步与投屏"
+      "phoneEnabled": "手机连接"
     },
     "enablingFeature": "正在{action}{feature}..."
   },

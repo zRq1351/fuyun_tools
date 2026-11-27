@@ -1,6 +1,6 @@
 <template>
   <div class="sync-section">
-    <!-- 手机功能总开关：与其它功能区保持一致的启用/停用开关 -->
+    <!-- 手机连接总开关（通道管理）：控制同步服务与通道面板，不改变设备授权 -->
     <div class="module-toggle">
       <div class="module-toggle-text">
         <h4>{{ $t('settings.sync.moduleTitle') }}</h4>
@@ -22,7 +22,198 @@
       {{ $t('settings.sync.moduleDisabledHint') }}
     </div>
 
-    <template v-else>
+    <!-- ===== 设备授权：一次扫码授权「剪贴板同步 + 投屏」两个能力 ===== -->
+    <div class="section-card">
+      <div class="section-head">
+        <div class="section-title">
+          设备授权
+        </div>
+        <div class="section-head-actions">
+          <el-button
+            size="small"
+            text
+            @click="syncHelpOpen = true"
+          >
+            使用帮助
+          </el-button>
+        </div>
+      </div>
+
+      <!-- 已授权设备（手机型号 / IP / 在线状态 / 能力标签） -->
+      <div
+        v-if="status.paired"
+        class="device-row"
+      >
+        <div class="device-avatar">
+          <svg viewBox="0 0 24 24"><rect
+            x="7"
+            y="2.5"
+            width="10"
+            height="19"
+            rx="2.5"
+          /><path d="M10.5 19h3" /></svg>
+        </div>
+        <div class="device-info">
+          <div class="device-name">
+            {{ status.deviceName || '已配对的手机' }}
+            <span
+              class="device-dot"
+              :class="{ online: status.deviceOnline }"
+            />
+            <span class="device-state">{{ status.deviceOnline ? '在线' : '离线' }}</span>
+          </div>
+          <div class="device-meta">
+            {{ status.deviceIp || '地址未知' }}
+            <template v-if="status.lastSeenMs">
+              · 最近活跃 {{ lastSeenLabel(status.lastSeenMs) }}
+            </template>
+          </div>
+          <div class="cap-row">
+            <el-tag
+              size="small"
+              :type="status.running ? 'success' : 'info'"
+              effect="plain"
+            >
+              剪贴板同步 · {{ status.running ? '服务已开' : '服务已关' }}
+            </el-tag>
+            <el-tag
+              size="small"
+              :type="status.mirrorAuthorized ? 'success' : 'info'"
+              effect="plain"
+            >
+              投屏 · {{ status.mirrorAuthorized ? '已授权' : '未授权' }}
+            </el-tag>
+          </div>
+        </div>
+        <el-button
+          size="small"
+          type="danger"
+          plain
+          @click="onUnpair"
+        >
+          吊销授权
+        </el-button>
+      </div>
+      <div
+        v-else
+        class="device-empty"
+      >
+        还没有手机获得授权 — 用手机「浮云剪贴板」扫描下方二维码即可授权
+      </div>
+
+      <!-- 授权二维码 -->
+      <template v-if="status.running">
+        <div
+          v-if="!status.paired || showPairBox"
+          class="pair-box"
+        >
+          <img
+            v-if="pairQr"
+            class="pairing-qr"
+            :src="pairQr"
+            alt="授权二维码"
+          >
+          <div class="pair-side">
+            <div class="pair-code">
+              {{ status.pairingCode || '------' }}
+            </div>
+            <div class="pair-meta">
+              <span v-if="status.pairingCode && status.pairingExpiresInSecs > 0">
+                {{ $t('settings.sync.expiresIn', {secs: status.pairingExpiresInSecs}) }}
+              </span>
+              <span v-else>{{ $t('settings.sync.codeExpired') }}</span>
+              <el-button
+                size="small"
+                text
+                @click="onRegenerate"
+              >
+                换一个
+              </el-button>
+            </div>
+            <div class="pair-hint">
+              手机扫码即完成授权，无需输入配对码
+            </div>
+            <div
+              v-if="address"
+              class="pair-address"
+            >
+              <code>{{ address }}</code>
+              <el-button
+                size="small"
+                text
+                @click="copyAddress"
+              >
+                {{ $t('settings.sync.copyAddress') }}
+              </el-button>
+            </div>
+          </div>
+        </div>
+        <div
+          v-else
+          class="device-empty pair-collapsed"
+        >
+          要授权新手机？
+          <el-button
+            size="small"
+            text
+            @click="showPairBox = true"
+          >
+            显示授权二维码
+          </el-button>
+        </div>
+      </template>
+      <div
+        v-else
+        class="device-empty"
+      >
+        {{ form.phoneEnabled ? '打开下方「剪贴板同步」开关后显示授权二维码' : '打开上方「手机连接」开关后即可授权新手机' }}
+      </div>
+
+      <p class="auth-note">
+        一次扫码完成授权；之后在手机 App「设备能力」里分别开启
+        <b>剪贴板同步</b> 与 <b>投屏</b>，两个能力互不影响。
+      </p>
+    </div>
+
+    <!-- 使用帮助弹窗（把长文字说明从页面移出） -->
+    <el-dialog
+      v-model="syncHelpOpen"
+      title="剪贴板同步 · 使用说明"
+      width="520px"
+      append-to-body
+    >
+      <ol class="help-list">
+        <li>电脑端打开「剪贴板同步」开关，页面会显示 6 位配对码</li>
+        <li>手机安装「浮云剪贴板」，与电脑连同一个 Wi-Fi</li>
+        <li>手机打开 App 自动发现电脑（找不到可手动输入地址）</li>
+        <li>扫描电脑上的二维码即自动配对完成；也可手动输入 6 位配对码</li>
+        <li>电脑复制任意文本/图片 → 手机自动写入剪贴板；手机 App 内可发送文本/图片到电脑</li>
+      </ol>
+      <p class="help-note">
+        为什么手机不能自动读剪贴板？Android 10+ 仅允许前台应用或默认输入法读取剪贴板，
+        因此采用 App 内主动发送的合法方案。
+      </p>
+    </el-dialog>
+
+    <el-dialog
+      v-model="mirrorHelpOpen"
+      title="手机投屏 · 使用说明"
+      width="520px"
+      append-to-body
+    >
+      <ol class="help-list">
+        <li>手机「设置 → 关于手机」连续点击「版本号」7 次，开启开发者模式</li>
+        <li>进入「设置 → 系统 → 开发者选项」</li>
+        <li>USB 投屏：打开「USB 调试」，插上数据线，在手机弹窗点「允许」</li>
+        <li>WiFi 投屏（Android 11+）：打开「无线调试」；或先插线用「一键切换无线」</li>
+        <li>独立投屏（Android 10+）：在投屏窗口工具栏点「独立投屏」，把当前应用投到虚拟显示器，手机可继续做别的事</li>
+        <li>中文输入：先在投屏画面上点击手机输入框，键盘弹出后再打字</li>
+      </ol>
+      <p class="help-note">
+        投屏画面仅经 USB 或局域网传输，不经过任何服务器。
+      </p>
+    </el-dialog>
+    <template v-if="form.phoneEnabled">
       <!-- 连接状态总览（一行看清两条通道） -->
       <div class="link-status">
         <div class="ls-item">
@@ -51,159 +242,6 @@
         >
           刷新
         </el-button>
-      </div>
-
-      <!-- ===== 设备授权：一次扫码授权「剪贴板同步 + 投屏」两个能力 ===== -->
-      <div class="section-card">
-        <div class="section-head">
-          <div class="section-title">
-            设备授权
-          </div>
-          <div class="section-head-actions">
-            <el-button
-              size="small"
-              text
-              @click="syncHelpOpen = true"
-            >
-              使用帮助
-            </el-button>
-          </div>
-        </div>
-
-        <!-- 已授权设备（手机型号 / IP / 在线状态 / 能力标签） -->
-        <div
-          v-if="status.paired"
-          class="device-row"
-        >
-          <div class="device-avatar">
-            <svg viewBox="0 0 24 24"><rect
-              x="7"
-              y="2.5"
-              width="10"
-              height="19"
-              rx="2.5"
-            /><path d="M10.5 19h3" /></svg>
-          </div>
-          <div class="device-info">
-            <div class="device-name">
-              {{ status.deviceName || '已配对的手机' }}
-              <span
-                class="device-dot"
-                :class="{ online: status.deviceOnline }"
-              />
-              <span class="device-state">{{ status.deviceOnline ? '在线' : '离线' }}</span>
-            </div>
-            <div class="device-meta">
-              {{ status.deviceIp || '地址未知' }}
-              <template v-if="status.lastSeenMs">
-                · 最近活跃 {{ lastSeenLabel(status.lastSeenMs) }}
-              </template>
-            </div>
-            <div class="cap-row">
-              <el-tag
-                size="small"
-                :type="status.running ? 'success' : 'info'"
-                effect="plain"
-              >
-                剪贴板同步 · {{ status.running ? '服务已开' : '服务已关' }}
-              </el-tag>
-              <el-tag
-                size="small"
-                :type="status.mirrorAuthorized ? 'success' : 'info'"
-                effect="plain"
-              >
-                投屏 · {{ status.mirrorAuthorized ? '已授权' : '未授权' }}
-              </el-tag>
-            </div>
-          </div>
-          <el-button
-            size="small"
-            type="danger"
-            plain
-            @click="onUnpair"
-          >
-            吊销授权
-          </el-button>
-        </div>
-        <div
-          v-else
-          class="device-empty"
-        >
-          还没有手机获得授权 — 用手机「浮云剪贴板」扫描下方二维码即可授权
-        </div>
-
-        <!-- 授权二维码 -->
-        <template v-if="status.running">
-          <div
-            v-if="!status.paired || showPairBox"
-            class="pair-box"
-          >
-            <img
-              v-if="pairQr"
-              class="pairing-qr"
-              :src="pairQr"
-              alt="授权二维码"
-            >
-            <div class="pair-side">
-              <div class="pair-code">
-                {{ status.pairingCode || '------' }}
-              </div>
-              <div class="pair-meta">
-                <span v-if="status.pairingCode && status.pairingExpiresInSecs > 0">
-                  {{ $t('settings.sync.expiresIn', {secs: status.pairingExpiresInSecs}) }}
-                </span>
-                <span v-else>{{ $t('settings.sync.codeExpired') }}</span>
-                <el-button
-                  size="small"
-                  text
-                  @click="onRegenerate"
-                >
-                  换一个
-                </el-button>
-              </div>
-              <div class="pair-hint">
-                手机扫码即完成授权，无需输入配对码
-              </div>
-              <div
-                v-if="address"
-                class="pair-address"
-              >
-                <code>{{ address }}</code>
-                <el-button
-                  size="small"
-                  text
-                  @click="copyAddress"
-                >
-                  {{ $t('settings.sync.copyAddress') }}
-                </el-button>
-              </div>
-            </div>
-          </div>
-          <div
-            v-else
-            class="device-empty pair-collapsed"
-          >
-            要授权新手机？
-            <el-button
-              size="small"
-              text
-              @click="showPairBox = true"
-            >
-              显示授权二维码
-            </el-button>
-          </div>
-        </template>
-        <div
-          v-else
-          class="device-empty"
-        >
-          打开下方「剪贴板同步」开关后显示授权二维码
-        </div>
-
-        <p class="auth-note">
-          一次扫码完成授权；之后在手机 App「设备能力」里分别开启
-          <b>剪贴板同步</b> 与 <b>投屏</b>，两个能力互不影响。
-        </p>
       </div>
 
       <!-- ===== 剪贴板同步（服务本身，不含授权） ===== -->
@@ -260,7 +298,7 @@
           v-if="mirrorLocked"
           class="auth-hint"
         >
-          手机尚未授权投屏 — 请在手机 App「设备能力」中打开「投屏」开关（首次需先扫码授权）
+          投屏已被手机端关闭 — 请在手机 App「设备能力」中打开「投屏」开关（电脑端已禁用相关入口）
         </div>
 
         <div class="mode-grid">
@@ -409,45 +447,6 @@
           </div>
         </template>
       </div>
-
-      <!-- 使用帮助弹窗（把长文字说明从页面移出） -->
-      <el-dialog
-        v-model="syncHelpOpen"
-        title="剪贴板同步 · 使用说明"
-        width="520px"
-        append-to-body
-      >
-        <ol class="help-list">
-          <li>电脑端打开「剪贴板同步」开关，页面会显示 6 位配对码</li>
-          <li>手机安装「浮云剪贴板」，与电脑连同一个 Wi-Fi</li>
-          <li>手机打开 App 自动发现电脑（找不到可手动输入地址）</li>
-          <li>扫描电脑上的二维码即自动配对完成；也可手动输入 6 位配对码</li>
-          <li>电脑复制任意文本/图片 → 手机自动写入剪贴板；手机 App 内可发送文本/图片到电脑</li>
-        </ol>
-        <p class="help-note">
-          为什么手机不能自动读剪贴板？Android 10+ 仅允许前台应用或默认输入法读取剪贴板，
-          因此采用 App 内主动发送的合法方案。
-        </p>
-      </el-dialog>
-
-      <el-dialog
-        v-model="mirrorHelpOpen"
-        title="手机投屏 · 使用说明"
-        width="520px"
-        append-to-body
-      >
-        <ol class="help-list">
-          <li>手机「设置 → 关于手机」连续点击「版本号」7 次，开启开发者模式</li>
-          <li>进入「设置 → 系统 → 开发者选项」</li>
-          <li>USB 投屏：打开「USB 调试」，插上数据线，在手机弹窗点「允许」</li>
-          <li>WiFi 投屏（Android 11+）：打开「无线调试」；或先插线用「一键切换无线」</li>
-          <li>独立投屏（Android 10+）：在投屏窗口工具栏点「独立投屏」，把当前应用投到虚拟显示器，手机可继续做别的事</li>
-          <li>中文输入：先在投屏画面上点击手机输入框，键盘弹出后再打字</li>
-        </ol>
-        <p class="help-note">
-          投屏画面仅经 USB 或局域网传输，不经过任何服务器。
-        </p>
-      </el-dialog>
     </template>
   </div>
 </template>
@@ -500,8 +499,8 @@ const mirrorHelpOpen = ref(false)
 const showPairBox = ref(false)
 // 当前投屏会话（用于「停止投屏/注销」）
 const mirrorSession = ref({running: false, deviceName: ''})
-// 已配对但手机未打开「投屏」开关时，电脑端不可发起投屏（纯 adb 场景不受限）
-const mirrorLocked = computed(() => status.running && status.paired && !status.mirrorAuthorized)
+// 已配对但手机未打开「投屏」开关 → 电脑端硬拦截（与服务是否运行无关；纯 adb 未配对场景不受限）
+const mirrorLocked = computed(() => status.paired && !status.mirrorAuthorized)
 const mirrorStopping = ref(false)
 let mirrorTimer = null
 

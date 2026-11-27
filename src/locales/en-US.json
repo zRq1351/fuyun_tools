@@ -103,8 +103,8 @@
       "backupDesc": "Export backup packages, restore preview & auto-backup config",
       "diagnostic": "Diagnostics",
       "diagnosticDesc": "View core health status & run diagnostic actions",
-      "sync": "Phone Sync",
-      "syncDesc": "Sync clipboard content with your phone",
+      "sync": "Phone Link",
+      "syncDesc": "Manage clipboard sync and mirroring channels",
       "developer": "Developer",
       "developerDesc": "Debug info & storage usage monitoring",
       "about": "About",
@@ -363,7 +363,7 @@
       "autoBackupFailed": "Auto-backup failed: {error}"
     },
     "sync": {
-      "title": "Phone Sync",
+      "title": "Phone Link",
       "enable": "Start Sync Service",
       "enableHint": "Once started, your phone and PC can sync clipboard content over the same LAN",
       "disable": "Stop Sync Service",
@@ -393,9 +393,9 @@
       "confirmTitle": "Notice",
       "expiresIn": "Expires in {secs}s",
       "codeExpired": "Pairing code expired, please regenerate",
-      "moduleTitle": "Phone features",
-      "moduleHint": "Enable clipboard sync and phone mirroring. Turning it off stops the sync service and hides mirroring.",
-      "moduleDisabledHint": "Phone features are off. Turn the switch above on to use clipboard sync and phone mirroring.",
+      "moduleTitle": "Phone Link",
+      "moduleHint": "Channel management: clipboard sync over Wi-Fi (app required), mirroring over USB / wireless debugging (no app needed). Turning it off stops the sync service and collapses these channel settings; existing mirror sessions keep running.",
+      "moduleDisabledHint": "Phone Link is off. Turn the switch above on to manage clipboard sync and mirroring channels.",
       "mirrorTitle": "Phone mirroring",
       "syncTitle": "Clipboard sync"
     },
@@ -534,7 +534,7 @@
       "selectionEnabled": "Text Selection",
       "launcherEnabled": "Launcher",
       "docManagerEnabled": "Document Manager",
-      "phoneEnabled": "Phone sync & mirroring"
+      "phoneEnabled": "Phone Link"
     },
     "enablingFeature": "{action}ing {feature}..."
   },
