@@ -392,6 +392,17 @@ const fitMode = ref(
 )
 let lastFitKey = ''
 const barShow = ref(true)
+// 散装一次性定时器登记（窗口关闭/卸载时统一清理，避免悬挂回调）
+const pendingTimeouts = new Set()
+function later(fn, ms) {
+  const id = setTimeout(() => {
+    pendingTimeouts.delete(id)
+    fn()
+  }, ms)
+  pendingTimeouts.add(id)
+  return id
+}
+
 // 全屏空闲时隐藏鼠标指针（动一下鼠标立即恢复），避免光标压在看片上
 const idleCursor = ref(false)
 let cursorTimer = null
@@ -547,26 +558,6 @@ function drawFrame(frame) {
     frameReady.value = true
     waitingLong.value = false
     if (frameWaitTimer) { clearTimeout(frameWaitTimer); frameWaitTimer = null }
-  window.removeEventListener('resize', onWindowResize)
-  clearCursorHide()
-  if (stageObserver) {
-    stageObserver.disconnect()
-    stageObserver = null
-  }
-  if (stageObserver) {
-    stageObserver.disconnect()
-    stageObserver = null
-  }
-  window.removeEventListener('resize', onWindowResize)
-  clearCursorHide()
-  if (stageObserver) {
-    stageObserver.disconnect()
-    stageObserver = null
-  }
-  if (stageObserver) {
-    stageObserver.disconnect()
-    stageObserver = null
-  }
   }
 }
 
@@ -715,7 +706,7 @@ function processPasteQueue() {
   sendControl({ kind: 'set-clipboard', paste: false, sequence: Date.now(), text: chunk })
   if (pasteWatch) clearTimeout(pasteWatch)
   // 兜底：回显异常丢失时 3s 后强制粘贴（避免卡队）
-  pasteWatch = setTimeout(() => firePaste(), 3000)
+  pasteWatch = later(() => firePaste(), 3000)
 }
 
 function onClipboardEcho(text) {
@@ -735,8 +726,8 @@ function firePaste() {
   sendDebug('KEYCODE_PASTE 注入')
   // KEYCODE_PASTE = 279
   sendControl({ kind: 'keycode', action: 0, keycode: 279, repeat: 0, metaState: 0 })
-  setTimeout(() => sendControl({ kind: 'keycode', action: 1, keycode: 279, repeat: 0, metaState: 0 }), 40)
-  if (pasteQueue.value.length) setTimeout(processPasteQueue, 300)
+  later(() => sendControl({ kind: 'keycode', action: 1, keycode: 279, repeat: 0, metaState: 0 }), 40)
+  if (pasteQueue.value.length) later(processPasteQueue, 300)
 }
 
 // 特殊键 → Android keycode（Enter/Backspace/方向键等）
@@ -811,7 +802,7 @@ function refocusKbd() {
 function showToast(msg, ms = 3000) {
   toastMsg.value = msg
   if (toastTimer) clearTimeout(toastTimer)
-  toastTimer = setTimeout(() => { toastMsg.value = '' }, ms)
+  toastTimer = later(() => { toastMsg.value = '' }, ms)
 }
 
 async function pushFile(path) {
@@ -1228,7 +1219,7 @@ function connectWebSocket(port) {
     waitingLong.value = false
     if (frameWaitTimer) clearTimeout(frameWaitTimer)
     // 8 秒仍无画面 → 给出排查提示（设备可能锁屏/授权未点）
-    frameWaitTimer = setTimeout(() => { waitingLong.value = true }, 8000)
+    frameWaitTimer = later(() => { waitingLong.value = true }, 8000)
     statusText.value = '已连接'
     refocusKbd() // 为 IME 组合输入聚焦捕获框
     // 会话重建（切换设备/独立投屏/自动恢复）后保持息屏状态
@@ -1246,26 +1237,6 @@ function connectWebSocket(port) {
     frameReady.value = false
     waitingLong.value = false
     if (frameWaitTimer) { clearTimeout(frameWaitTimer); frameWaitTimer = null }
-  window.removeEventListener('resize', onWindowResize)
-  clearCursorHide()
-  if (stageObserver) {
-    stageObserver.disconnect()
-    stageObserver = null
-  }
-  if (stageObserver) {
-    stageObserver.disconnect()
-    stageObserver = null
-  }
-  window.removeEventListener('resize', onWindowResize)
-  clearCursorHide()
-  if (stageObserver) {
-    stageObserver.disconnect()
-    stageObserver = null
-  }
-  if (stageObserver) {
-    stageObserver.disconnect()
-    stageObserver = null
-  }
     if (!stopped) errorMsg.value = '与投屏服务的连接已断开'
     statusText.value = '未连接'
   }
@@ -1313,39 +1284,33 @@ onMounted(async () => {
   }
 })
 
-onUnmounted(() => {
+onUnmounted(cleanup)
+
+/** 窗口关闭（beforeunload/pagehide 不一定走 Vue 卸载）时也执行一次清理 */
+function cleanup() {
   stopped = true
   if (watchdogTimer) { clearInterval(watchdogTimer); watchdogTimer = null }
   if (frameWaitTimer) { clearTimeout(frameWaitTimer); frameWaitTimer = null }
-  window.removeEventListener('resize', onWindowResize)
-  clearCursorHide()
-  if (stageObserver) {
-    stageObserver.disconnect()
-    stageObserver = null
-  }
-  if (stageObserver) {
-    stageObserver.disconnect()
-    stageObserver = null
-  }
-  window.removeEventListener('resize', onWindowResize)
-  clearCursorHide()
-  if (stageObserver) {
-    stageObserver.disconnect()
-    stageObserver = null
-  }
-  if (stageObserver) {
-    stageObserver.disconnect()
-    stageObserver = null
-  }
+  if (pasteWatch) { clearTimeout(pasteWatch); pasteWatch = null }
+  if (toastTimer) { clearTimeout(toastTimer); toastTimer = null }
+  if (cursorTimer) { clearTimeout(cursorTimer); cursorTimer = null }
+  for (const id of pendingTimeouts) clearTimeout(id)
+  pendingTimeouts.clear()
   if (swipeGesture) { clearInterval(swipeGesture.timer); swipeGesture = null }
-  if (unlistenResize) { unlistenResize(); unlistenResize = null }
-  if (unlistenDrag) { unlistenDrag(); unlistenDrag = null }
+  if (stageObserver) { stageObserver.disconnect(); stageObserver = null }
+  window.removeEventListener('resize', onWindowResize)
   window.removeEventListener('keydown', onKeydown)
   window.removeEventListener('focus', refocusKbd)
-  if (toastTimer) clearTimeout(toastTimer)
+  if (unlistenResize) { unlistenResize(); unlistenResize = null }
+  if (unlistenDrag) { unlistenDrag(); unlistenDrag = null }
+  idleCursor.value = false
   if (ws) { try { ws.close() } catch { /* ignore */ } ws = null }
   if (decoder) { try { decoder.close() } catch { /* ignore */ } decoder = null }
-})
+}
+
+window.addEventListener('beforeunload', cleanup)
+window.addEventListener('pagehide', cleanup)
+
 </script>
 
 <style scoped>
