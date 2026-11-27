@@ -67,6 +67,7 @@ pub fn router(
         // 手机 App「投屏到电脑」远程入口（与剪贴板同步共用认证）
         .route("/api/mirror/start", post(mirror_start_route))
         .route("/api/mirror/authorize", post(mirror_authorize_route))
+        .route("/api/mirror/adb", get(mirror_adb_route))
         .route("/api/mirror/status", get(mirror_status_route))
         .layer(axum::extract::DefaultBodyLimit::max(32 * 1024 * 1024))
         .layer(axum::middleware::from_fn_with_state(
@@ -228,6 +229,34 @@ async fn push_clip(
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
     Ok(Json(serde_json::json!({ "ok": true })))
+}
+
+/// 手机 → PC：查询电脑端 adb 设备连接状态（USB 与无线调试都算），
+/// 供手机端「重新检测」给出准确提示，而不是一律提示插线。
+async fn mirror_adb_route(
+    State(s): State<ServerState>,
+    headers: HeaderMap,
+) -> Json<serde_json::Value> {
+    let token = request_token(&headers, None);
+    if check_token(&s.sync, &token).is_err() {
+        return Json(serde_json::json!({ "ok": false, "error": "认证失败，请重新配对" }));
+    }
+    match crate::features::mirror::commands::mirror_adb_status(s.app.clone()).await {
+        Ok(mut v) => {
+            if let Some(obj) = v.as_object_mut() {
+                obj.insert("ok".to_string(), serde_json::Value::Bool(true));
+                // 是否是无线（serial 形如 ip:port）
+                let wireless = obj
+                    .get("serial")
+                    .and_then(|x| x.as_str())
+                    .map(|x| x.contains(':'))
+                    .unwrap_or(false);
+                obj.insert("wireless".to_string(), serde_json::Value::Bool(wireless));
+            }
+            Json(v)
+        }
+        Err(e) => Json(serde_json::json!({ "ok": false, "error": e })),
+    }
 }
 
 /// 手机 → PC：设置投屏授权开关（扫码授权后可分别勾选同步 / 投屏）。
