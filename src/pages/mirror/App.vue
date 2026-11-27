@@ -1,7 +1,7 @@
 <template>
   <div
     class="mirror-page"
-    :class="[theme, { fullscreen: isFs, 'bar-show': barShow, 'no-frame': fitMode !== 'contain' }]"
+    :class="[theme, { fullscreen: isFs, 'bar-show': barShow, 'no-frame': fitMode !== 'contain', 'hide-cursor': idleCursor }]"
     @mousemove="onMouseMove"
   >
     <div
@@ -356,7 +356,7 @@
 </template>
 
 <script setup>
-import { onMounted, onUnmounted, computed, ref } from 'vue'
+import { onMounted, onUnmounted, computed, ref, watch } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { IPC_COMMANDS } from '../../services/ipc'   
 import { getCurrentWindow } from '@tauri-apps/api/window'
@@ -392,6 +392,26 @@ const fitMode = ref(
 )
 let lastFitKey = ''
 const barShow = ref(true)
+// 全屏空闲时隐藏鼠标指针（动一下鼠标立即恢复），避免光标压在看片上
+const idleCursor = ref(false)
+let cursorTimer = null
+
+function scheduleCursorHide() {
+  idleCursor.value = false
+  if (cursorTimer) clearTimeout(cursorTimer)
+  if (!isFs.value) return
+  cursorTimer = setTimeout(() => {
+    idleCursor.value = true
+  }, 1200)
+}
+
+function clearCursorHide() {
+  idleCursor.value = false
+  if (cursorTimer) {
+    clearTimeout(cursorTimer)
+    cursorTimer = null
+  }
+}
 const dragging = ref(false)
 const toastMsg = ref('')
 let toastTimer = null
@@ -528,6 +548,7 @@ function drawFrame(frame) {
     waitingLong.value = false
     if (frameWaitTimer) { clearTimeout(frameWaitTimer); frameWaitTimer = null }
   window.removeEventListener('resize', onWindowResize)
+  clearCursorHide()
   if (stageObserver) {
     stageObserver.disconnect()
     stageObserver = null
@@ -537,6 +558,7 @@ function drawFrame(frame) {
     stageObserver = null
   }
   window.removeEventListener('resize', onWindowResize)
+  clearCursorHide()
   if (stageObserver) {
     stageObserver.disconnect()
     stageObserver = null
@@ -960,6 +982,7 @@ async function toggleFullscreen() {
 }
 
 function onMouseMove(event) {
+  scheduleCursorHide()
   if (!isFs.value) {
     barShow.value = true
     return
@@ -1224,6 +1247,7 @@ function connectWebSocket(port) {
     waitingLong.value = false
     if (frameWaitTimer) { clearTimeout(frameWaitTimer); frameWaitTimer = null }
   window.removeEventListener('resize', onWindowResize)
+  clearCursorHide()
   if (stageObserver) {
     stageObserver.disconnect()
     stageObserver = null
@@ -1233,6 +1257,7 @@ function connectWebSocket(port) {
     stageObserver = null
   }
   window.removeEventListener('resize', onWindowResize)
+  clearCursorHide()
   if (stageObserver) {
     stageObserver.disconnect()
     stageObserver = null
@@ -1254,6 +1279,11 @@ onMounted(async () => {
       try { isFs.value = await getCurrentWindow().isFullscreen() } catch { /* ignore */ }
     })
   } catch { /* ignore */ }
+  // 全屏状态变化时管理鼠标指针隐藏
+  watch(isFs, (fs) => {
+    clearCursorHide()
+    if (fs) scheduleCursorHide()
+  })
   window.addEventListener('keydown', onKeydown)
   try {
     unlistenDrag = await getCurrentWebview().onDragDropEvent((ev) => {
@@ -1288,6 +1318,7 @@ onUnmounted(() => {
   if (watchdogTimer) { clearInterval(watchdogTimer); watchdogTimer = null }
   if (frameWaitTimer) { clearTimeout(frameWaitTimer); frameWaitTimer = null }
   window.removeEventListener('resize', onWindowResize)
+  clearCursorHide()
   if (stageObserver) {
     stageObserver.disconnect()
     stageObserver = null
@@ -1297,6 +1328,7 @@ onUnmounted(() => {
     stageObserver = null
   }
   window.removeEventListener('resize', onWindowResize)
+  clearCursorHide()
   if (stageObserver) {
     stageObserver.disconnect()
     stageObserver = null
@@ -1587,6 +1619,11 @@ onUnmounted(() => {
   border-radius: 0;
   box-shadow: none;
   overflow: hidden;
+}
+
+.mirror-page.hide-cursor,
+.mirror-page.hide-cursor * {
+  cursor: none !important;
 }
 
 .mirror-page.no-frame .screen {
