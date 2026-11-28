@@ -444,7 +444,9 @@ pub fn run() {
             }
 
             let app_handle_clone_recording = app_handle.clone();
-            if recording_enabled {
+            // 不论录屏总开关是否开启都注册快捷键：
+            // 否则关闭时按快捷键毫无反应且无日志，无法判断是「未注册」还是「窗口起不来」
+            {
                 if let Err(e) = app.global_shortcut().on_shortcut(
                     recording_hot_key.as_str(),
                     move |_app, _shortcut, event| {
@@ -459,6 +461,8 @@ pub fn run() {
                 ) {
                     log::warn!("录屏快捷键 '{}' 注册失败: {}", recording_hot_key, e);
                     shortcut_conflicts.push(format!("录屏：{}", recording_hot_key));
+                } else {
+                    log::warn!("录屏快捷键已注册: {}", recording_hot_key);
                 }
             }
 

@@ -860,8 +860,22 @@ pub async fn toggle_recording_from_shortcut(app: AppHandle) {
     }
     let _guard = RecordingShortcutGuard;
     RECORDING_SHORTCUT_LAST_TRIGGER_MS.store(now_ms, Ordering::Release);
-    if let Ok((window, _created)) = ensure_recording_toolbar_window(&app) {
+    log::warn!("[recording] 快捷键触发：开始切换工具栏可见性");
+    let (window, created) = match ensure_recording_toolbar_window(&app) {
+        Ok(v) => v,
+        Err(e) => {
+            // 之前这里是 if let Ok(..)，失败静默：表现为「按快捷键毫无反应」
+            log::warn!("[recording] 创建/获取工具栏窗口失败: {}", e);
+            return;
+        }
+    };
+    {
         let is_visible = window.is_visible().unwrap_or(false);
+        log::warn!(
+            "[recording] 工具栏当前 visible={}, 新建={}",
+            is_visible,
+            created
+        );
         if is_visible {
             if let Err(e) =
                 crate::ui::window_manager::hide_overlay_window_by_label(&app, "recording_toolbar")
@@ -885,6 +899,7 @@ pub async fn toggle_recording_from_shortcut(app: AppHandle) {
             if let Err(e) = app.emit("recording-toolbar-force-compact", ()) {
                 log::warn!("发送录屏工具栏强制紧凑事件失败: {}", e);
             }
+            log::warn!("[recording] 已请求显示工具栏");
         }
     }
 }
