@@ -895,6 +895,16 @@ pub async fn toggle_recording_from_shortcut(app: AppHandle) {
             let _ = window.set_content_protected(content_protected);
             if let Err(e) = show_overlay_window_by_label(&app, "recording_toolbar", true) {
                 log::warn!("显示录屏工具栏失败: {}", e);
+            } else {
+                // 记录位置/尺寸，便于判断「显示了但在屏幕外/尺寸为 0」
+                let pos = window.outer_position().map(|p| (p.x, p.y));
+                let size = window.outer_size().map(|s| (s.width, s.height));
+                log::warn!(
+                    "[recording] 工具栏已显示 pos={:?} size={:?} visible={:?}",
+                    pos,
+                    size,
+                    window.is_visible().ok()
+                );
             }
             if let Err(e) = app.emit("recording-toolbar-force-compact", ()) {
                 log::warn!("发送录屏工具栏强制紧凑事件失败: {}", e);
