@@ -393,30 +393,6 @@ const capsuleSettingsVisible = ref(false);
 // 因此初始即视为已启用，避免读取设置前短暂显示"录屏已停用"
 const recordingFeatureEnabled = ref(true);
 
-const {
-    captureSystemAudio,
-    captureMicrophone,
-    isMicMuted,
-    systemOutputId,
-    microphoneDeviceId,
-    systemOutputs,
-    microphones,
-    audioProcesses,
-    systemAudioProcessIds,
-    onSystemAudioDeviceChange,
-    onMicrophoneDeviceChange,
-    refreshSystemOutputDevices,
-    refreshMicrophoneDevices,
-    refreshAudioProcesses,
-    onSystemAudioDropdownVisibleChange,
-    onMicrophoneDropdownVisibleChange,
-    onAudioProcessDropdownVisibleChange,
-} = useAudioDevices({
-    canEditAudioConfig,
-    rawRecordingState,
-    showInlineNotice,
-    showBackendErrorInSettings,
-})
 const recordTargetType = ref("screen");
 const recordTargetWindowId = ref("");
 const recordableWindows = ref([]);
@@ -668,6 +644,31 @@ const showBackendErrorInSettings = async (message) => {
     console.error("唤醒控制台窗口失败:", e);
   }
 };
+
+const {
+    captureSystemAudio,
+    captureMicrophone,
+    isMicMuted,
+    systemOutputId,
+    microphoneDeviceId,
+    systemOutputs,
+    microphones,
+    audioProcesses,
+    systemAudioProcessIds,
+    onSystemAudioDeviceChange,
+    onMicrophoneDeviceChange,
+    refreshSystemOutputDevices,
+    refreshMicrophoneDevices,
+    refreshAudioProcesses,
+    onSystemAudioDropdownVisibleChange,
+    onMicrophoneDropdownVisibleChange,
+    onAudioProcessDropdownVisibleChange,
+} = useAudioDevices({
+    canEditAudioConfig,
+    rawRecordingState,
+    showInlineNotice,
+    showBackendErrorInSettings,
+})
 
 let wasHiddenForRegionPick = false
 
