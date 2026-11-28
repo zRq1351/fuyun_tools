@@ -955,6 +955,9 @@ pub fn run() {
                         crate::features::screenshot::longshot::kill_active_ffmpeg_child();
                         // 投屏会话随退出清理（杀 server 进程、撤 adb 隧道）
                         crate::features::mirror::shutdown(app_handle);
+                        // adb 守护进程必须一并结束：否则会锁住安装目录下的
+                        // _up_/third_party/scrcpy/*.dll，下次覆盖安装会失败
+                        crate::features::mirror::adb::kill_server(Some(app_handle));
                         log::info!("应用退出，已发送后台线程停止信号");
                     }
                     _ => {}

@@ -25,6 +25,22 @@ fn hide_console(cmd: &mut Command) {
 #[cfg(not(windows))]
 fn hide_console(_cmd: &mut Command) {}
 
+/// 结束 adb 守护进程（应用退出 / 安装升级前调用）。
+/// adb.exe 会以守护进程形式常驻，锁住安装目录下 `_up_/third_party/scrcpy/*.dll`，
+/// 导致下次覆盖安装报 "Error opening file for writing"（2026-11-28 实测踩坑）。
+pub fn kill_server(app: Option<&tauri::AppHandle>) {
+    let Ok(adb) = resolve_adb(app) else {
+        return;
+    };
+    let mut cmd = Command::new(&adb);
+    cmd.arg("kill-server");
+    hide_console(&mut cmd);
+    match cmd.output() {
+        Ok(_) => log::info!("已停止 adb 守护进程"),
+        Err(e) => log::warn!("停止 adb 守护进程失败: {}", e),
+    }
+}
+
 /// 依序探测 adb：随包资源 → PATH → 常见 SDK 位置。
 pub fn resolve_adb(app: Option<&tauri::AppHandle>) -> Result<PathBuf, String> {
     if let Some(app) = app {
