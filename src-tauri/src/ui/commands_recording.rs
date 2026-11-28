@@ -840,6 +840,19 @@ pub async fn run_recording_regression(
 pub(crate) static RECORDING_SHORTCUT_IN_FLIGHT: AtomicBool = AtomicBool::new(false);
 pub(crate) static RECORDING_SHORTCUT_LAST_TRIGGER_MS: AtomicU64 = AtomicU64::new(0);
 pub(crate) const RECORDING_SHORTCUT_MIN_INTERVAL_MS: u64 = 300;
+/// 录屏快捷键当前是否处于「按下未松开」状态（用于屏蔽键盘自动重复）
+pub(crate) static RECORDING_KEY_DOWN: AtomicBool = AtomicBool::new(false);
+
+/// 按下沿判定：只有「从未按下 → 按下」才返回 true，键盘自动重复返回 false。
+/// `key_held` 由上层根据系统快捷键事件维护；松开时置 false。
+pub(crate) fn is_new_key_press(key_held: &AtomicBool, now_ms: u64) -> bool {
+    if !key_held.swap(true, Ordering::AcqRel) {
+        return true;
+    }
+    // 兜底：个别环境可能丢失松开事件，超过 3 秒视为新的一次按键
+    let last = RECORDING_SHORTCUT_LAST_TRIGGER_MS.load(Ordering::Relaxed);
+    now_ms.saturating_sub(last) >= 3000
+}
 
 struct RecordingShortcutGuard;
 impl Drop for RecordingShortcutGuard {
@@ -1080,5 +1093,42 @@ mod tests {
         assert_eq!(v["ffmpegPath"], "C:/bin/ffmpeg.exe");
         assert_eq!(v["binDir"], "C:/bin");
         assert_eq!(v["downloadUrl"], "https://gitee.com/f");
+    }
+}
+
+#[cfg(test)]
+mod press_edge_tests {
+    use super::*;
+
+    #[test]
+    fn first_press_is_new() {
+        let held = AtomicBool::new(false);
+        assert!(is_new_key_press(&held, 1000));
+    }
+
+    #[test]
+    fn auto_repeat_is_ignored() {
+        let held = AtomicBool::new(false);
+        RECORDING_SHORTCUT_LAST_TRIGGER_MS.store(1000, Ordering::Release);
+        assert!(is_new_key_press(&held, 1000));
+        // 键盘自动重复：同一次按下期间的后续 Pressed 事件
+        assert!(!is_new_key_press(&held, 1030));
+        assert!(!is_new_key_press(&held, 1060));
+    }
+
+    #[test]
+    fn press_after_release_is_new() {
+        let held = AtomicBool::new(false);
+        RECORDING_SHORTCUT_LAST_TRIGGER_MS.store(1000, Ordering::Release);
+        assert!(is_new_key_press(&held, 1000));
+        held.store(false, Ordering::Release); // 模拟松开
+        assert!(is_new_key_press(&held, 1500));
+    }
+
+    #[test]
+    fn stuck_held_recovers_after_timeout() {
+        let held = AtomicBool::new(true); // 松开事件丢失
+        RECORDING_SHORTCUT_LAST_TRIGGER_MS.store(1000, Ordering::Release);
+        assert!(is_new_key_press(&held, 4500));
     }
 }

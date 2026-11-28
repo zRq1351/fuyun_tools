@@ -450,12 +450,27 @@ pub fn run() {
                 if let Err(e) = app.global_shortcut().on_shortcut(
                     recording_hot_key.as_str(),
                     move |_app, _shortcut, event| {
-                        if let ShortcutState::Pressed = event.state {
-                            // 防抖与互斥已下沉到 toggle_recording_from_shortcut 入口（#12/#13/#43）
-                            let app_handle_inner = app_handle_clone_recording.clone();
-                            tauri::async_runtime::spawn(async move {
-                                toggle_recording_from_shortcut(app_handle_inner).await;
-                            });
+                        match event.state {
+                            ShortcutState::Pressed => {
+                                // 按住不放会持续发 Pressed（键盘自动重复），必须做「按下沿」判定：
+                                // 否则一次按键会来回切换多次，表现为「工具栏闪一下就消失」
+                                let now = crate::utils::utils_helpers::now_unix_ms_u64();
+                                if !crate::ui::commands_recording::is_new_key_press(
+                                    &crate::ui::commands_recording::RECORDING_KEY_DOWN,
+                                    now,
+                                ) {
+                                    return;
+                                }
+                                // 防抖与互斥已下沉到 toggle_recording_from_shortcut 入口（#12/#13/#43）
+                                let app_handle_inner = app_handle_clone_recording.clone();
+                                tauri::async_runtime::spawn(async move {
+                                    toggle_recording_from_shortcut(app_handle_inner).await;
+                                });
+                            }
+                            ShortcutState::Released => {
+                                crate::ui::commands_recording::RECORDING_KEY_DOWN
+                                    .store(false, std::sync::atomic::Ordering::Release);
+                            }
                         }
                     },
                 ) {
